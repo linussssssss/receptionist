@@ -1,0 +1,1 @@
+An AI phone receptionist, based on Claude AI, Deepgram, ElevenLabs and Twilio.

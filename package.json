@@ -1,0 +1,57 @@
+{
+  "name": "ai-receptionist-poc",
+  "version": "1.0.0",
+  "main": "dist/server.js",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio",
+    "db:push": "prisma db push",
+    "test": "echo \"Tests coming soon\" && exit 0",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "directories": {
+    "test": "tests"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/linussssssss/receptionist.git"
+  },
+  "bugs": {
+    "url": "https://github.com/linussssssss/receptionist/issues"
+  },
+  "homepage": "https://github.com/linussssssss/receptionist#readme",
+  "description": "",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
+    "@deepgram/sdk": "^4.11.3",
+    "@fastify/cors": "^11.2.0",
+    "@fastify/websocket": "^11.2.0",
+    "@prisma/client": "^6.1.0",
+    "dotenv": "^17.2.3",
+    "elevenlabs-node": "^2.0.3",
+    "fastify": "^5.6.2",
+    "ioredis": "^5.8.2",
+    "pino": "^10.1.0",
+    "pino-pretty": "^13.1.3",
+    "redis": "^5.10.0",
+    "twilio": "^5.11.1",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "@types/twilio": "^3.19.2",
+    "@types/ws": "^8.18.1",
+    "nodemon": "^3.1.11",
+    "prisma": "^6.1.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
