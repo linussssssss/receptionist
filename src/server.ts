@@ -3,6 +3,8 @@ import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import { env } from './config/env.js';
 import { PrismaClient } from '@prisma/client';
+import { webhookRoutes } from './routes/webhooks.js';
+import fastifyFormbody from '@fastify/formbody';
 
 // Initialize Prisma Client
 export const prisma = new PrismaClient({
@@ -28,9 +30,12 @@ const fastify = Fastify({
   requestIdLogLabel: 'reqId',
   disableRequestLogging: false,
   trustProxy: true,
+  bodyLimit: 1048576, // 1MB
 });
 
 // Register plugins
+await fastify.register(fastifyFormbody);
+
 await fastify.register(cors, {
   origin: env.ALLOWED_ORIGINS.split(','),
   credentials: true,
@@ -41,6 +46,9 @@ await fastify.register(websocket, {
     maxPayload: 1048576, // 1MB for audio chunks
   },
 });
+
+// Register routes
+await fastify.register(webhookRoutes);
 
 // Health check endpoint
 fastify.get('/health', async (_request, reply) => {
@@ -110,9 +118,9 @@ const start = async () => {
       host: '0.0.0.0', // Listen on all interfaces
     });
     
-    fastify.log.info(` Server running on http://localhost:${env.PORT}`);
-    fastify.log.info(` Health check: http://localhost:${env.PORT}/health`);
-    fastify.log.info(` Environment: ${env.NODE_ENV}`);
+    fastify.log.info(`Server running on http://localhost:${env.PORT}`);
+    fastify.log.info(`Health check: http://localhost:${env.PORT}/health`);
+    fastify.log.info(`Environment: ${env.NODE_ENV}`);
     
   } catch (err) {
     fastify.log.error({ err }, 'Failed to start server');
