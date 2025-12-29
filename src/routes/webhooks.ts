@@ -4,6 +4,10 @@ import { prisma } from '../server.js';
 import { env } from '../config/env.js';
 import { twilioService } from '../services/telephony/twilio.service.js';
 import { callSessionManager } from '../services/telephony/call-session.manager.js';
+import { claudeService } from '../services/ai/claude.service.js';
+import { intentClassifier } from '../services/business-logic/intent.classifier.js';
+import { appointmentHandler } from '../services/business-logic/appointment.handler.js';
+import { buildReceptionistPrompt, defaultBusinessContext, type BusinessContext } from '../prompts/index.js';
 import type {
   TwilioIncomingCallEvent,
   TwilioCallStatusEvent,
@@ -143,19 +147,182 @@ export async function webhookRoutes(fastify: FastifyInstance) {
           );
         }
 
+        // Get session
+        const session = callSessionManager.getSession(event.CallSid);
+        if (!session) {
+          fastify.log.warn('Session not found for call:', event.CallSid);
+          reply.type('text/xml');
+          return twilioService.createSayAndHangup('Es tut mir leid, ein Fehler ist aufgetreten.');
+        }
+
         // Add user message to session
-        callSessionManager.addMessage(event.CallSid, 'user', userSpeech);
+        await callSessionManager.addMessage(event.CallSid, 'user', userSpeech);
 
-        // TODO: Phase 3 - Send to Claude for AI processing
-        // For now, just echo back
-        const aiResponse = `Sie haben gesagt: ${userSpeech}. Wie kann ich Ihnen weiter helfen?`;
+        // Save user message to database
+        const call = await prisma.call.findFirst({
+          where: { callSid: event.CallSid },
+        });
+
+        if (call) {
+          await prisma.message.create({
+            data: {
+              callId: call.id,
+              role: 'USER',
+              content: userSpeech,
+            },
+          });
+        }
+
+        // Get client config
+        const client = await prisma.client.findUnique({
+          where: { id: session.clientId },
+        });
+
+        if (!client) {
+          reply.type('text/xml');
+          return twilioService.createSayAndHangup('Es tut mir leid, ein Fehler ist aufgetreten.');
+        }
+
+        // Classify intent
+        const intentResult = await intentClassifier.classify(
+          userSpeech,
+          session.conversationHistory
+        );
+
+        fastify.log.info({ intentResult }, 'Intent classified');
+
+        // Store intent
+        callSessionManager.setIntent(event.CallSid, intentResult.intent);
+
+        // Check if should escalate
+        const shouldEscalate = intentClassifier.shouldEscalate(
+          intentResult.intent,
+          intentResult.confidence,
+          session.conversationHistory,
+          client.escalationRules
+        );
+
+        if (shouldEscalate) {
+          fastify.log.info('Escalating call to human');
+          reply.type('text/xml');
+          return twilioService.createSayAndHangup(
+            'Einen Moment bitte, ich verbinde Sie mit einem Mitarbeiter.'
+          );
+        }
+
+        // Handle appointment booking
+        if (intentResult.intent === 'appointment_booking') {
+          // Extract appointment details
+          const appointmentData = await appointmentHandler.extractDetails(
+            session.conversationHistory
+          );
+
+          callSessionManager.updateCollectedData(event.CallSid, appointmentData);
+
+          // Check if we have all required fields
+          if (appointmentHandler.hasRequiredFields(appointmentData)) {
+            // Create appointment
+            try {
+              // Get the Call database record
+              if (!call) {
+                throw new Error('Call record not found');
+              }
+
+              await appointmentHandler.createAppointment(
+                call.id,
+                client.id,
+                appointmentData
+              );
+
+              const confirmation = appointmentHandler.generateConfirmation(appointmentData);
+              await callSessionManager.addMessage(event.CallSid, 'assistant', confirmation);
+
+              // Save confirmation message
+              await prisma.message.create({
+                data: {
+                  callId: call.id,
+                  role: 'ASSISTANT',
+                  content: confirmation,
+                },
+              });
+
+              reply.type('text/xml');
+              return twilioService.createSayAndHangup(confirmation);
+            } catch (err) {
+              fastify.log.error({ err }, 'Failed to create appointment');
+            }
+          } else {
+            // Ask for missing information
+            const missingFields = appointmentHandler.getMissingFields(appointmentData);
+            const prompt = appointmentHandler.generateCollectionPrompt(missingFields);
+            
+            await callSessionManager.addMessage(event.CallSid, 'assistant', prompt);
+
+            // Save prompt message
+            if (call) {
+              await prisma.message.create({
+                data: {
+                  callId: call.id,
+                  role: 'ASSISTANT',
+                  content: prompt,
+                },
+              });
+            }
+
+            reply.type('text/xml');
+            return twilioService.createGatherResponse(
+              prompt,
+              `${env.TWILIO_WEBHOOK_URL}/webhooks/twilio/gather`
+            );
+          }
+        }
+
+        // ============================================
+        // THIS IS THE KEY CHANGE:
+        // Build the proper receptionist prompt instead of using client.llmSystemPrompt
+        // ============================================
         
-        callSessionManager.addMessage(event.CallSid, 'assistant', aiResponse);
+        // Build business context - using defaults for now since these fields
+        // aren't in the Client model yet. You can add them to your Prisma schema later.
+        const businessContext: BusinessContext = {
+          // For now, we'll use the default business context
+          // Later you can pull these from client fields once you add them to your schema
+          ...defaultBusinessContext,
+          
+          // Override with any client-specific data you DO have:
+          companyName: client.name || defaultBusinessContext.companyName,
+          // businessType: client.businessType || defaultBusinessContext.businessType, // Add to schema later
+          // services: client.services || defaultBusinessContext.services, // Add to schema later
+          // etc.
+        };
 
-        // Continue gathering
+        // Generate the strong receptionist prompt
+        const systemPrompt = buildReceptionistPrompt(businessContext);
+
+        // Generate AI response using Claude with the proper prompt
+        const aiResponse = await claudeService.generateResponse(
+          systemPrompt,  // <-- NOW USING THE STRONG PROMPT
+          session.conversationHistory,
+          userSpeech
+        );
+
+        await callSessionManager.addMessage(event.CallSid, 'assistant', aiResponse.response);
+
+        // Save assistant message to database
+        if (call) {
+          await prisma.message.create({
+            data: {
+              callId: call.id,
+              role: 'ASSISTANT',
+              content: aiResponse.response,
+            },
+          });
+        }
+
+        // Continue conversation
         reply.type('text/xml');
         return twilioService.createGatherResponse(
-          aiResponse,
+          aiResponse.response,
           `${env.TWILIO_WEBHOOK_URL}/webhooks/twilio/gather`
         );
         

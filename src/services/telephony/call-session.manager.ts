@@ -47,11 +47,11 @@ class CallSessionManager {
   /**
    * Add message to conversation history
    */
-  addMessage(
+  async addMessage(
     callId: string,
     role: 'user' | 'assistant',
     content: string
-  ): void {
+  ): Promise<void> {
     const session = this.sessions.get(callId);
     if (session) {
       session.conversationHistory.push({
