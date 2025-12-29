@@ -56,3 +56,4 @@ recordings/
 *.cert
 secrets/
 /src/generated/prisma
+/logs-pers

@@ -44,8 +44,8 @@ export class ClaudeService {
       console.log('Calling Claude API with messages:', messages.length);
 
       const response = await this.client.messages.create({
-        model: 'claude-haiku-4-5', // Faster model
-        max_tokens: 512, // Reduced for faster responses
+        model: 'claude-haiku-4-5',
+        max_tokens: 512,
         system: systemPrompt,
         messages,
       });
@@ -121,28 +121,25 @@ IMPORTANT: Always respond with valid JSON only. No explanations, no markdown, ju
 
       console.log('Intent classification raw response:', responseText);
 
-      // Clean up response - remove markdown code blocks if present
       const cleanedText = responseText
         .replace(/```json\n?/g, '')
         .replace(/```\n?/g, '')
         .trim();
 
-      // Parse JSON response
       const parsed = JSON.parse(cleanedText);
       
       console.log('Parsed intent:', parsed);
 
       return {
         intent: parsed.intent || 'other',
-        confidence: parsed.confidence || 0.8, // Default to 0.8 instead of 0.3
+        confidence: parsed.confidence || 0.8,
         data: parsed.data || {},
       };
     } catch (err: any) {
       console.error('Intent classification error:', err.message);
-      // Return high confidence for "other" so call doesn't drop
       return {
         intent: 'other',
-        confidence: 0.8, // Changed from 0.3 to 0.8
+        confidence: 0.8,
       };
     }
   }
@@ -154,20 +151,36 @@ IMPORTANT: Always respond with valid JSON only. No explanations, no markdown, ju
     conversationHistory: ConversationMessage[]
   ): Promise<Record<string, any>> {
     try {
-      const systemPrompt = `You are extracting appointment booking information from a German conversation.
+      const systemPrompt = `You are a DATA EXTRACTION system. Your job is to READ the conversation and EXTRACT information, NOT to have a conversation.
 
-Extract the following fields if mentioned:
-- date: ISO date string (YYYY-MM-DD)
-- time: Time string (HH:MM)
-- name: Customer name
-- phone: Phone number
-- reason: Reason for appointment
-- email: Email address (if provided)
+INSTRUCTIONS:
+1. READ the conversation history carefully
+2. EXTRACT the following fields if they appear ANYWHERE in the conversation:
+   - date: ISO date string (YYYY-MM-DD)
+   - time: Time string (HH:MM)
+   - name: Customer name
+   - phone: Phone number
+3. Return ONLY a JSON object with the fields you found
+4. If a field is not mentioned anywhere in the conversation, omit it
 
-Respond ONLY with valid JSON. If a field is not mentioned, omit it.
+CRITICAL RULES:
+- DO NOT ask questions
+- DO NOT generate conversational responses
+- DO NOT add explanatory text
+- ONLY return the JSON object
+- Look through ALL messages in the conversation to find information
 
-Example:
-{"date": "2025-01-15", "time": "14:30", "name": "Max Müller", "reason": "Zahnreinigung"}`;
+Example input conversation:
+User: "Ich möchte einen Termin"
+Assistant: "Wann möchten Sie kommen?"
+User: "Am 15. Januar um 14 Uhr"
+Assistant: "Ihr Name bitte?"
+User: "Max Müller"
+
+Example output (JSON ONLY):
+{"date": "2025-01-15", "time": "14:00", "name": "Max Müller"}
+
+Remember: You are extracting data from an existing conversation, not participating in it.`;
 
       const messages: Anthropic.MessageParam[] = conversationHistory.map((msg) => ({
         role: msg.role,
@@ -185,7 +198,59 @@ Example:
         ? response.content[0].text 
         : '{}';
 
-      return JSON.parse(responseText);
+      console.log('Appointment extraction raw response:', responseText);
+
+      // Clean up response - remove markdown code blocks if present
+      let cleanedText = responseText
+        .replace(/```json\n?/g, '')
+        .replace(/```\n?/g, '')
+        .trim();
+
+      console.log('After removing markdown:', cleanedText);
+
+      // Sometimes Claude adds extra text after the JSON - extract only the JSON part
+      // Find the first { and the matching closing }
+      const firstBrace = cleanedText.indexOf('{');
+      if (firstBrace === -1) {
+        console.log('No JSON object found in response');
+        return {};
+      }
+
+      // Find the matching closing brace
+      let braceCount = 0;
+      let lastBrace = firstBrace;
+      for (let i = firstBrace; i < cleanedText.length; i++) {
+        if (cleanedText[i] === '{') braceCount++;
+        if (cleanedText[i] === '}') {
+          braceCount--;
+          if (braceCount === 0) {
+            lastBrace = i;
+            break;
+          }
+        }
+      }
+
+      // Extract only the JSON portion
+      cleanedText = cleanedText.substring(firstBrace, lastBrace + 1);
+      console.log('Extracted JSON only:', cleanedText);
+
+      const parsed = JSON.parse(cleanedText);
+
+      const allowedFields = ['date', 'time', 'name', 'phone'];
+      const filtered = Object.keys(parsed)
+        .filter(key => allowedFields.includes(key))
+        .reduce((obj, key) => {
+          obj[key] = parsed[key];
+          return obj;
+        }, {} as Record<string, any>);
+
+      console.log('Filtered appointment data:', filtered);
+
+      const requiredFields = ['date', 'time', 'name', 'phone'];
+      const missingFields = requiredFields.filter(field => !filtered[field]);
+      console.log('Missing fields:', missingFields);
+
+      return filtered;
     } catch (err) {
       console.error('Appointment extraction error:', err);
       return {};

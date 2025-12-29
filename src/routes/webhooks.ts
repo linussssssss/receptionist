@@ -246,10 +246,34 @@ export async function webhookRoutes(fastify: FastifyInstance) {
                 },
               });
 
+              // FIXED: Continue conversation instead of hanging up
               reply.type('text/xml');
-              return twilioService.createSayAndHangup(confirmation);
+              return twilioService.createGatherResponse(
+                confirmation + ' Kann ich Ihnen sonst noch weiterhelfen?',
+                `${env.TWILIO_WEBHOOK_URL}/webhooks/twilio/gather`
+              );
             } catch (err) {
               fastify.log.error({ err }, 'Failed to create appointment');
+              
+              // If appointment creation fails, inform user and continue conversation
+              const errorMessage = 'Entschuldigung, es gab ein Problem beim Speichern des Termins. Bitte versuchen Sie es später erneut oder rufen Sie uns direkt an.';
+              await callSessionManager.addMessage(event.CallSid, 'assistant', errorMessage);
+              
+              if (call) {
+                await prisma.message.create({
+                  data: {
+                    callId: call.id,
+                    role: 'ASSISTANT',
+                    content: errorMessage,
+                  },
+                });
+              }
+              
+              reply.type('text/xml');
+              return twilioService.createGatherResponse(
+                errorMessage,
+                `${env.TWILIO_WEBHOOK_URL}/webhooks/twilio/gather`
+              );
             }
           } else {
             // Ask for missing information
@@ -277,23 +301,10 @@ export async function webhookRoutes(fastify: FastifyInstance) {
           }
         }
 
-        // ============================================
-        // THIS IS THE KEY CHANGE:
-        // Build the proper receptionist prompt instead of using client.llmSystemPrompt
-        // ============================================
-        
-        // Build business context - using defaults for now since these fields
-        // aren't in the Client model yet. You can add them to your Prisma schema later.
+        // Build the proper receptionist prompt
         const businessContext: BusinessContext = {
-          // For now, we'll use the default business context
-          // Later you can pull these from client fields once you add them to your schema
           ...defaultBusinessContext,
-          
-          // Override with any client-specific data you DO have:
           companyName: client.name || defaultBusinessContext.companyName,
-          // businessType: client.businessType || defaultBusinessContext.businessType, // Add to schema later
-          // services: client.services || defaultBusinessContext.services, // Add to schema later
-          // etc.
         };
 
         // Generate the strong receptionist prompt
@@ -301,7 +312,7 @@ export async function webhookRoutes(fastify: FastifyInstance) {
 
         // Generate AI response using Claude with the proper prompt
         const aiResponse = await claudeService.generateResponse(
-          systemPrompt,  // <-- NOW USING THE STRONG PROMPT
+          systemPrompt,
           session.conversationHistory,
           userSpeech
         );

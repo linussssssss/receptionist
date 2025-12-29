@@ -1,137 +1,157 @@
+// appointment.handler.ts - FIXED VERSION
 import { claudeService } from '../ai/claude.service.js';
 import { prisma } from '../../server.js';
 
-export interface AppointmentData {
-  date?: string;
-  time?: string;
-  name?: string;
-  phone?: string;
-  email?: string;
-  reason?: string;
+interface AppointmentData {
+  date?: string;      // ISO date (YYYY-MM-DD)
+  time?: string;      // Time (HH:MM)
+  name?: string;      // Customer name
+  phone?: string;     // Phone number
+  // NOTE: We deliberately DO NOT include 'reason' - it's not in our schema
 }
+
+// Define ONLY the fields we actually need and have in the database
+const REQUIRED_FIELDS = ['date', 'time', 'name', 'phone'] as const;
 
 export class AppointmentHandler {
   /**
-   * Extract appointment details from conversation
+   * Extract appointment details from conversation history
    */
   async extractDetails(
-    conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }>
+    conversationHistory: Array<{ role: string; content: string }>
   ): Promise<AppointmentData> {
-    return await claudeService.extractAppointmentDetails(conversationHistory);
+    // Cast to the correct type expected by claudeService
+    const messages = conversationHistory.map(msg => ({
+      role: msg.role as 'user' | 'assistant',
+      content: msg.content,
+    }));
+    
+    return await claudeService.extractAppointmentDetails(messages);
   }
 
   /**
-   * Check if all required fields are collected
+   * Check if we have all required fields
    */
   hasRequiredFields(data: AppointmentData): boolean {
-    return !!(data.date && data.time && data.name && data.phone);
+    return REQUIRED_FIELDS.every(field => {
+      const value = data[field];
+      return value !== undefined && value !== null && value !== '';
+    });
   }
 
   /**
-   * Get missing fields for appointment
+   * Get list of missing fields
    */
   getMissingFields(data: AppointmentData): string[] {
-    const required = ['date', 'time', 'name', 'phone'];
-    return required.filter((field) => !data[field as keyof AppointmentData]);
+    return REQUIRED_FIELDS.filter(field => {
+      const value = data[field];
+      return value === undefined || value === null || value === '';
+    });
   }
 
   /**
    * Generate prompt to collect missing information
+   * IMPORTANT: Only ask for fields we actually need
    */
   generateCollectionPrompt(missingFields: string[]): string {
-    const fieldNames: Record<string, string> = {
-      date: 'Datum',
-      time: 'Uhrzeit',
-      name: 'Name',
-      phone: 'Telefonnummer',
-      reason: 'Grund für den Termin',
+    const fieldPrompts: Record<string, string> = {
+      date: 'An welchem Tag möchten Sie den Termin? Bitte nennen Sie mir das Datum.',
+      time: 'Zu welcher Uhrzeit passt es Ihnen am besten?',
+      name: 'Wie ist Ihr Name, bitte?',
+      phone: 'Unter welcher Telefonnummer können wir Sie erreichen?',
     };
 
-    if (missingFields.length === 1) {
-      return `Können Sie mir bitte noch ${fieldNames[missingFields[0]]} nennen?`;
+    // Get prompts for missing fields only
+    const prompts = missingFields
+      .filter(field => field in fieldPrompts)
+      .map(field => fieldPrompts[field]);
+
+    if (prompts.length === 0) {
+      return 'Perfekt! Ich habe alle Informationen.';
     }
 
-    const fields = missingFields.map((f) => fieldNames[f]).join(', ');
-    return `Ich benötige noch folgende Informationen: ${fields}`;
+    if (prompts.length === 1) {
+      return prompts[0];
+    }
+
+    // Multiple missing fields - ask for the first one
+    return prompts[0];
   }
 
   /**
    * Create appointment in database
    */
   async createAppointment(
-    callId: string | null | undefined,
+    callId: string,
     clientId: string,
     data: AppointmentData
   ): Promise<any> {
     if (!this.hasRequiredFields(data)) {
-      throw new Error('Missing required appointment fields');
+      throw new Error('Missing required fields for appointment creation');
     }
 
-    // Parse datetime
-    const datetime = new Date(`${data.date}T${data.time}:00`);
+    // Combine date and time into ISO timestamp
+    const scheduledTime = new Date(`${data.date}T${data.time}:00.000Z`);
 
     return await prisma.appointment.create({
       data: {
-        callId: callId || undefined,
+        callId,
         clientId,
         customerName: data.name!,
         customerPhone: data.phone!,
-        customerEmail: data.email,
-        datetime,
-        reason: data.reason,
-        status: 'PENDING',
+        datetime: scheduledTime,
+        status: 'CONFIRMED',
+        notes: 'Über Telefon vereinbart',
       },
     });
-  }
-
-  /**
-   * Check if requested time slot is available
-   */
-  async isSlotAvailable(
-    clientId: string,
-    datetime: Date,
-    durationMinutes: number = 30
-  ): Promise<boolean> {
-    const endTime = new Date(datetime.getTime() + durationMinutes * 60000);
-
-    const conflicting = await prisma.appointment.findFirst({
-      where: {
-        clientId,
-        status: {
-          in: ['PENDING', 'CONFIRMED'],
-        },
-        OR: [
-          {
-            datetime: {
-              gte: datetime,
-              lt: endTime,
-            },
-          },
-          {
-            AND: [
-              {
-                datetime: {
-                  lte: datetime,
-                },
-              },
-              // Assuming 30min appointments by default
-            ],
-          },
-        ],
-      },
-    });
-
-    return !conflicting;
   }
 
   /**
    * Generate confirmation message
    */
   generateConfirmation(data: AppointmentData): string {
-    return `Perfekt! Ihr Termin ist gebucht für ${data.date} um ${data.time} Uhr. 
-Wir haben Ihre Daten gespeichert: ${data.name}, ${data.phone}.
-${data.reason ? `Grund: ${data.reason}.` : ''}
-Sie erhalten eine Bestätigung per SMS. Haben Sie noch weitere Fragen?`;
+    const dateObj = new Date(data.date!);
+    const dateStr = dateObj.toLocaleDateString('de-DE', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+
+    return `Perfekt! Ich habe einen Termin für ${data.name} am ${dateStr} um ${data.time} Uhr eingetragen. Wir werden Sie unter der Nummer ${data.phone} kontaktieren, falls es Änderungen gibt.`;
+  }
+
+  /**
+   * Validate appointment data quality
+   */
+  validateData(data: AppointmentData): { valid: boolean; errors: string[] } {
+    const errors: string[] = [];
+
+    // Validate date format
+    if (data.date && !/^\d{4}-\d{2}-\d{2}$/.test(data.date)) {
+      errors.push('Invalid date format');
+    }
+
+    // Validate time format
+    if (data.time && !/^\d{2}:\d{2}$/.test(data.time)) {
+      errors.push('Invalid time format');
+    }
+
+    // Validate date is in the future
+    if (data.date) {
+      const appointmentDate = new Date(data.date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      if (appointmentDate < today) {
+        errors.push('Date cannot be in the past');
+      }
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors,
+    };
   }
 }
 
