@@ -196,6 +196,17 @@ export class GoogleCalendarService {
     const endTime = new Date(appointment.datetime);
     endTime.setMinutes(endTime.getMinutes() + appointment.durationMinutes);
 
+    // Format datetime without timezone conversion - assume DB stores in local time
+    const formatDateTimeForCalendar = (date: Date): string => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      const seconds = String(date.getSeconds()).padStart(2, '0');
+      return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+    };
+
     return {
       summary: `Appointment: ${appointment.customerName}`,
       description: [
@@ -206,11 +217,11 @@ export class GoogleCalendarService {
         appointment.notes ? `Notes: ${appointment.notes}` : '',
       ].filter(Boolean).join('\n'),
       start: {
-        dateTime: appointment.datetime.toISOString(),
+        dateTime: formatDateTimeForCalendar(appointment.datetime),
         timeZone: 'Europe/Berlin', // TODO: Make configurable per client
       },
       end: {
-        dateTime: endTime.toISOString(),
+        dateTime: formatDateTimeForCalendar(endTime),
         timeZone: 'Europe/Berlin',
       },
       attendees: appointment.customerEmail
