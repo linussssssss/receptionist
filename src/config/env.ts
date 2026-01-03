@@ -32,6 +32,8 @@ const envSchema = z.object({
   // Integrations (optional for now)
   GOOGLE_CALENDAR_CLIENT_ID: z.string().optional(),
   GOOGLE_CALENDAR_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_CALENDAR_REDIRECT_URI: z.string().optional(),
+  GOOGLE_CALENDAR_WEBHOOK_URL: z.string().optional(),
   HUBSPOT_API_KEY: z.string().optional(),
 
   // Monitoring

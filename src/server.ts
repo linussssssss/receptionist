@@ -6,6 +6,7 @@ import { PrismaClient } from '@prisma/client';
 import { webhookRoutes } from './routes/webhooks.js';
 import { apiRoutes } from './routes/api.js';
 import { audioRoutes } from './routes/audio.js';
+import { integrationRoutes } from './routes/integrations.js';
 import fastifyFormbody from '@fastify/formbody';
 
 // Initialize Prisma Client
@@ -53,6 +54,7 @@ await fastify.register(websocket, {
 await fastify.register(webhookRoutes);
 await fastify.register(apiRoutes);
 await fastify.register(audioRoutes);
+await fastify.register(integrationRoutes);
 
 // Health check endpoint
 fastify.get('/health', async (_request, reply) => {

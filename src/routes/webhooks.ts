@@ -8,6 +8,7 @@ import { claudeService } from '../services/ai/claude.service.js';
 import { intentClassifier } from '../services/business-logic/intent.classifier.js';
 import { appointmentHandler } from '../services/business-logic/appointment.handler.js';
 import { incrementalExtractor } from '../services/business-logic/incremental-extractor.service.js';
+import { calendarSyncService } from '../services/integrations/calendar-sync.service.js';
 // Prompts are now managed in the database via Client.llmSystemPrompt
 import type {
   TwilioIncomingCallEvent,
@@ -310,11 +311,24 @@ export async function webhookRoutes(fastify: FastifyInstance) {
                 throw new Error('Call record not found');
               }
 
-              await appointmentHandler.createAppointment(
+              const appointment = await appointmentHandler.createAppointment(
                 call.id,
                 client.id,
                 updatedData
               );
+
+              // Sync to Google Calendar if enabled
+              if (appointment && client.integrations) {
+                const googleCalendarConfig = (client.integrations as any)?.googleCalendar;
+                if (googleCalendarConfig?.enabled) {
+                  // Sync in background - don't block appointment creation
+                  calendarSyncService.syncAppointmentToCalendar(appointment.id, 'CREATE')
+                    .catch(err => {
+                      fastify.log.error({ err, appointmentId: appointment.id },
+                        'Failed to sync appointment to Google Calendar');
+                    });
+                }
+              }
 
               const confirmation = appointmentHandler.generateConfirmation(updatedData);
               await callSessionManager.addMessage(event.CallSid, 'assistant', confirmation);

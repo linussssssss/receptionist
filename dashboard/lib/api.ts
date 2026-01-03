@@ -197,4 +197,49 @@ export const api = {
       body: JSON.stringify(settings),
     });
   },
+
+  // Google Calendar Integration
+  getCalendarAuthUrl: (clientId: string, redirectUri: string) => {
+    return fetchApi<{ authUrl: string }>(
+      `/api/integrations/google-calendar/auth/url?clientId=${clientId}&redirectUri=${encodeURIComponent(redirectUri)}`
+    );
+  },
+
+  completeCalendarAuth: (code: string, clientId: string) => {
+    return fetchApi<{ success: boolean; message: string }>(
+      `/api/integrations/google-calendar/auth/callback`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ code, clientId }),
+      }
+    );
+  },
+
+  disconnectCalendar: (clientId: string) => {
+    return fetchApi<{ success: boolean; message: string}>(
+      `/api/integrations/google-calendar/disconnect?clientId=${clientId}`,
+      { method: 'DELETE' }
+    );
+  },
+
+  getCalendarStatus: (clientId: string) => {
+    return fetchApi<{
+      connected: boolean;
+      calendarId?: string;
+      connectedAt?: string;
+      lastSyncAt?: string;
+      webhookActive?: boolean;
+      webhookExpiration?: string;
+    }>(`/api/integrations/google-calendar/status?clientId=${clientId}`);
+  },
+
+  manualSync: (clientId: string, appointmentId?: string) => {
+    return fetchApi<{ success: boolean; synced: number; failed: number }>(
+      `/api/integrations/google-calendar/sync/manual`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ clientId, appointmentId }),
+      }
+    );
+  },
 };
