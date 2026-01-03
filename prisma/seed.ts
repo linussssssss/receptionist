@@ -53,6 +53,7 @@ async function main() {
         greetingMessage,
         llmSystemPrompt: systemPrompt,
         voiceId: process.env.ELEVENLABS_VOICE_ID || null,
+        useElevenLabsTTS: !!process.env.ELEVENLABS_VOICE_ID, // Enable if voice ID is set
         escalationRules,
         isActive: true,
       },
@@ -70,6 +71,7 @@ async function main() {
         greetingMessage,
         llmSystemPrompt: systemPrompt,
         voiceId: process.env.ELEVENLABS_VOICE_ID || null,
+        useElevenLabsTTS: !!process.env.ELEVENLABS_VOICE_ID, // Enable if voice ID is set
         escalationRules,
         isActive: true,
       },
