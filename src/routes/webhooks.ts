@@ -8,7 +8,7 @@ import { claudeService } from '../services/ai/claude.service.js';
 import { intentClassifier } from '../services/business-logic/intent.classifier.js';
 import { appointmentHandler } from '../services/business-logic/appointment.handler.js';
 import { incrementalExtractor } from '../services/business-logic/incremental-extractor.service.js';
-import { buildReceptionistPrompt, defaultBusinessContext, type BusinessContext } from '../prompts/index.js';
+// Prompts are now managed in the database via Client.llmSystemPrompt
 import type {
   TwilioIncomingCallEvent,
   TwilioCallStatusEvent,
@@ -358,13 +358,9 @@ export async function webhookRoutes(fastify: FastifyInstance) {
           }
         }
 
-        // Build the proper receptionist prompt
-        const businessContext: BusinessContext = {
-          ...defaultBusinessContext,
-          companyName: client.name || defaultBusinessContext.companyName,
-        };
-
-        const systemPrompt = buildReceptionistPrompt(businessContext);
+        // Use the client's custom system prompt from database
+        // This allows editing the prompt through the Settings page
+        const systemPrompt = client.llmSystemPrompt;
 
         // Generate AI response using Claude
         const aiResponse = await claudeService.generateResponse(
