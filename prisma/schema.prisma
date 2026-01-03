@@ -22,7 +22,8 @@ model Client {
   greetingMessage   String   @db.Text
   llmSystemPrompt   String   @db.Text
   voiceId           String?  // ElevenLabs voice ID
-  
+  useElevenLabsTTS  Boolean  @default(false) // Use ElevenLabs instead of Twilio Polly
+
   // Features and rules
   escalationRules   Json     // Transfer rules, keywords, etc.
   integrations      Json?    // Calendar, CRM configs

@@ -43,7 +43,7 @@ export class TwilioService {
    */
   createGatherResponse(message: string, actionUrl: string): string {
     const response = new VoiceResponse();
-    
+
     const gather = response.gather({
       input: ['speech'],
       language: 'de-DE',
@@ -59,6 +59,65 @@ export class TwilioService {
       },
       message
     );
+
+    return response.toString();
+  }
+
+  /**
+   * Create TwiML response using ElevenLabs for greeting
+   */
+  createGreetingResponseWithElevenLabs(
+    greeting: string,
+    audioBaseUrl: string,
+    clientId: string,
+    actionUrl?: string
+  ): string {
+    const response = new VoiceResponse();
+
+    // Build audio URL with query params
+    const audioUrl = `${audioBaseUrl}/audio/tts?text=${encodeURIComponent(greeting)}&clientId=${clientId}`;
+
+    // Play ElevenLabs audio
+    response.play(audioUrl);
+
+    // If actionUrl provided, gather speech input
+    if (actionUrl) {
+      response.gather({
+        input: ['speech'],
+        language: 'de-DE',
+        action: actionUrl,
+        speechTimeout: 'auto',
+        timeout: 5,
+      });
+    }
+
+    return response.toString();
+  }
+
+  /**
+   * Create TwiML response using ElevenLabs and gather input
+   */
+  createGatherResponseWithElevenLabs(
+    message: string,
+    audioBaseUrl: string,
+    clientId: string,
+    actionUrl: string
+  ): string {
+    const response = new VoiceResponse();
+
+    // Build audio URL
+    const audioUrl = `${audioBaseUrl}/audio/tts?text=${encodeURIComponent(message)}&clientId=${clientId}`;
+
+    const gather = response.gather({
+      input: ['speech'],
+      language: 'de-DE',
+      action: actionUrl,
+      speechTimeout: 'auto',
+      timeout: 5,
+    });
+
+    // Play ElevenLabs audio
+    gather.play(audioUrl);
 
     return response.toString();
   }

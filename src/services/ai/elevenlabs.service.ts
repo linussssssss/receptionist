@@ -12,10 +12,12 @@ export class ElevenLabsService {
   /**
    * Convert text to speech and return audio buffer
    */
-  async textToSpeech(text: string): Promise<Buffer> {
+  async textToSpeech(text: string, voiceId?: string): Promise<Buffer> {
+    const selectedVoiceId = voiceId || this.voiceId;
+
     try {
       const response = await fetch(
-        `https://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}`,
+        `https://api.elevenlabs.io/v1/text-to-speech/${selectedVoiceId}`,
         {
           method: 'POST',
           headers: {

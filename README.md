@@ -6,3 +6,4 @@ npm run dev
 npm run db:studio
 npx tsx scripts\seed-test-client.ts => Add new DB entry
 npx tsx test-appointment-flow.ts
+npx tsx test-full-integration.ts

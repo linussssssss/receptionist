@@ -8,7 +8,7 @@ import { claudeService } from '../services/ai/claude.service.js';
 import { intentClassifier } from '../services/business-logic/intent.classifier.js';
 import { appointmentHandler } from '../services/business-logic/appointment.handler.js';
 import { incrementalExtractor } from '../services/business-logic/incremental-extractor.service.js';
-import { buildReceptionistPrompt, defaultBusinessContext, type BusinessContext } from '../prompts/index.js';
+// Prompts are now managed in the database via Client.llmSystemPrompt
 import type {
   TwilioIncomingCallEvent,
   TwilioCallStatusEvent,
@@ -111,9 +111,20 @@ export async function webhookRoutes(fastify: FastifyInstance) {
         // Respond with greeting and gather input
         const greeting = client.greetingMessage || 'Guten Tag, wie kann ich Ihnen helfen?';
         const actionUrl = `${env.TWILIO_WEBHOOK_URL}/webhooks/twilio/gather`;
-        
+
         reply.type('text/xml');
-        return twilioService.createGreetingResponse(greeting, actionUrl);
+
+        // Use ElevenLabs if enabled, otherwise use Twilio Polly
+        if ((client as any).useElevenLabsTTS && client.voiceId) {
+          return twilioService.createGreetingResponseWithElevenLabs(
+            greeting,
+            env.TWILIO_WEBHOOK_URL || '',
+            client.id,
+            actionUrl
+          );
+        } else {
+          return twilioService.createGreetingResponse(greeting, actionUrl);
+        }
         
       } catch (err) {
         fastify.log.error({ err }, 'Error handling incoming call');
@@ -138,21 +149,41 @@ export async function webhookRoutes(fastify: FastifyInstance) {
         fastify.log.info({ event }, 'Speech input received');
 
         const userSpeech = event.SpeechResult || event.Digits || '';
-        
-        if (!userSpeech) {
-          reply.type('text/xml');
-          return twilioService.createGatherResponse(
-            'Entschuldigung, ich habe Sie nicht verstanden. Können Sie das bitte wiederholen?',
-            `${env.TWILIO_WEBHOOK_URL}/webhooks/twilio/gather`
-          );
-        }
 
-        // Get session
+        // Get session early to access client settings
         const session = callSessionManager.getSession(event.CallSid);
         if (!session) {
           fastify.log.warn('Session not found for call:', event.CallSid);
           reply.type('text/xml');
           return twilioService.createSayAndHangup('Es tut mir leid, ein Fehler ist aufgetreten.');
+        }
+
+        // Get client config early for TTS selection
+        const client = await prisma.client.findUnique({
+          where: { id: session.clientId },
+        });
+
+        if (!client) {
+          reply.type('text/xml');
+          return twilioService.createSayAndHangup('Es tut mir leid, ein Fehler ist aufgetreten.');
+        }
+
+        // Check if user speech is empty and prompt again
+        if (!userSpeech) {
+          reply.type('text/xml');
+          const actionUrl = `${env.TWILIO_WEBHOOK_URL}/webhooks/twilio/gather`;
+          const message = 'Entschuldigung, ich habe Sie nicht verstanden. Können Sie das bitte wiederholen?';
+
+          if ((client as any).useElevenLabsTTS && client.voiceId) {
+            return twilioService.createGatherResponseWithElevenLabs(
+              message,
+              env.TWILIO_WEBHOOK_URL || '',
+              client.id,
+              actionUrl
+            );
+          } else {
+            return twilioService.createGatherResponse(message, actionUrl);
+          }
         }
 
         // Add user message to session
@@ -173,11 +204,7 @@ export async function webhookRoutes(fastify: FastifyInstance) {
           });
         }
 
-        // Get client config
-        const client = await prisma.client.findUnique({
-          where: { id: session.clientId },
-        });
-
+        // Client is already fetched above, continue with existing logic
         if (!client) {
           reply.type('text/xml');
           return twilioService.createSayAndHangup('Es tut mir leid, ein Fehler ist aufgetreten.');
@@ -307,10 +334,19 @@ export async function webhookRoutes(fastify: FastifyInstance) {
 
               // Continue conversation
               reply.type('text/xml');
-              return twilioService.createGatherResponse(
-                confirmation + ' Kann ich Ihnen sonst noch weiterhelfen?',
-                `${env.TWILIO_WEBHOOK_URL}/webhooks/twilio/gather`
-              );
+              const message = confirmation + ' Kann ich Ihnen sonst noch weiterhelfen?';
+              const actionUrl = `${env.TWILIO_WEBHOOK_URL}/webhooks/twilio/gather`;
+
+              if ((client as any).useElevenLabsTTS && client.voiceId) {
+                return twilioService.createGatherResponseWithElevenLabs(
+                  message,
+                  env.TWILIO_WEBHOOK_URL || '',
+                  client.id,
+                  actionUrl
+                );
+              } else {
+                return twilioService.createGatherResponse(message, actionUrl);
+              }
             } catch (err) {
               fastify.log.error({ err }, 'Failed to create appointment');
               
@@ -328,10 +364,18 @@ export async function webhookRoutes(fastify: FastifyInstance) {
               }
               
               reply.type('text/xml');
-              return twilioService.createGatherResponse(
-                errorMessage,
-                `${env.TWILIO_WEBHOOK_URL}/webhooks/twilio/gather`
-              );
+              const actionUrl = `${env.TWILIO_WEBHOOK_URL}/webhooks/twilio/gather`;
+
+              if ((client as any).useElevenLabsTTS && client.voiceId) {
+                return twilioService.createGatherResponseWithElevenLabs(
+                  errorMessage,
+                  env.TWILIO_WEBHOOK_URL || '',
+                  client.id,
+                  actionUrl
+                );
+              } else {
+                return twilioService.createGatherResponse(errorMessage, actionUrl);
+              }
             }
           } else {
             // Ask for next missing field
@@ -351,20 +395,24 @@ export async function webhookRoutes(fastify: FastifyInstance) {
             }
 
             reply.type('text/xml');
-            return twilioService.createGatherResponse(
-              prompt,
-              `${env.TWILIO_WEBHOOK_URL}/webhooks/twilio/gather`
-            );
+            const actionUrl = `${env.TWILIO_WEBHOOK_URL}/webhooks/twilio/gather`;
+
+            if ((client as any).useElevenLabsTTS && client.voiceId) {
+              return twilioService.createGatherResponseWithElevenLabs(
+                prompt,
+                env.TWILIO_WEBHOOK_URL || '',
+                client.id,
+                actionUrl
+              );
+            } else {
+              return twilioService.createGatherResponse(prompt, actionUrl);
+            }
           }
         }
 
-        // Build the proper receptionist prompt
-        const businessContext: BusinessContext = {
-          ...defaultBusinessContext,
-          companyName: client.name || defaultBusinessContext.companyName,
-        };
-
-        const systemPrompt = buildReceptionistPrompt(businessContext);
+        // Use the client's custom system prompt from database
+        // This allows editing the prompt through the Settings page
+        const systemPrompt = client.llmSystemPrompt;
 
         // Generate AI response using Claude
         const aiResponse = await claudeService.generateResponse(
@@ -388,10 +436,18 @@ export async function webhookRoutes(fastify: FastifyInstance) {
 
         // Continue conversation
         reply.type('text/xml');
-        return twilioService.createGatherResponse(
-          aiResponse.response,
-          `${env.TWILIO_WEBHOOK_URL}/webhooks/twilio/gather`
-        );
+        const actionUrl = `${env.TWILIO_WEBHOOK_URL}/webhooks/twilio/gather`;
+
+        if ((client as any).useElevenLabsTTS && client.voiceId) {
+          return twilioService.createGatherResponseWithElevenLabs(
+            aiResponse.response,
+            env.TWILIO_WEBHOOK_URL || '',
+            client.id,
+            actionUrl
+          );
+        } else {
+          return twilioService.createGatherResponse(aiResponse.response, actionUrl);
+        }
         
       } catch (err) {
         fastify.log.error({ err }, 'Error processing speech input');
