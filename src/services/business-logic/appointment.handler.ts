@@ -16,9 +16,12 @@ const REQUIRED_FIELDS = ['date', 'time', 'name', 'phone'] as const;
 export class AppointmentHandler {
   /**
    * Extract appointment details from conversation history
+   * @param conversationHistory - Array of conversation messages
+   * @param maxMessages - Optional limit on how many messages to analyze
    */
   async extractDetails(
-    conversationHistory: Array<{ role: string; content: string }>
+    conversationHistory: Array<{ role: string; content: string }>,
+    maxMessages?: number
   ): Promise<AppointmentData> {
     // Cast to the correct type expected by claudeService
     const messages = conversationHistory.map(msg => ({
@@ -26,7 +29,7 @@ export class AppointmentHandler {
       content: msg.content,
     }));
     
-    return await claudeService.extractAppointmentDetails(messages);
+    return await claudeService.extractAppointmentDetails(messages, maxMessages);
   }
 
   /**

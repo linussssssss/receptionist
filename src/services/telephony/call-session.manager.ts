@@ -64,6 +64,7 @@ class CallSessionManager {
 
   /**
    * Update collected data (for appointment booking, etc.)
+   * Pass an empty object {} to clear all collected data
    */
   updateCollectedData(
     callId: string,
@@ -71,10 +72,15 @@ class CallSessionManager {
   ): void {
     const session = this.sessions.get(callId);
     if (session) {
-      session.collectedData = {
-        ...session.collectedData,
-        ...data,
-      };
+      // If empty object passed, clear the data instead of merging
+      if (Object.keys(data).length === 0) {
+        session.collectedData = {};
+      } else {
+        session.collectedData = {
+          ...session.collectedData,
+          ...data,
+        };
+      }
     }
   }
 

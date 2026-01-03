@@ -7,7 +7,6 @@ import { callSessionManager } from '../services/telephony/call-session.manager.j
 import { claudeService } from '../services/ai/claude.service.js';
 import { intentClassifier } from '../services/business-logic/intent.classifier.js';
 import { appointmentHandler } from '../services/business-logic/appointment.handler.js';
-import { incrementalExtractor } from '../services/business-logic/incremental-extractor.service.js';
 import { buildReceptionistPrompt, defaultBusinessContext, type BusinessContext } from '../prompts/index.js';
 import type {
   TwilioIncomingCallEvent,
@@ -120,7 +119,7 @@ export async function webhookRoutes(fastify: FastifyInstance) {
         reply.type('text/xml');
         return twilioService.createSayAndHangup(
           'Es tut mir leid, ein Fehler ist aufgetreten. Auf Wiederhören.'
-        );
+          );
       }
     }
   );
@@ -140,6 +139,7 @@ export async function webhookRoutes(fastify: FastifyInstance) {
         const userSpeech = event.SpeechResult || event.Digits || '';
         
         if (!userSpeech) {
+          // No input detected
           reply.type('text/xml');
           return twilioService.createGatherResponse(
             'Entschuldigung, ich habe Sie nicht verstanden. Können Sie das bitte wiederholen?',
@@ -199,32 +199,25 @@ export async function webhookRoutes(fastify: FastifyInstance) {
         );
 
         if (isRequestingNewAppointment) {
-          // Clear old appointment data for new booking
+          // User wants a NEW appointment - clear old data
           console.log('New appointment request detected, clearing collected data');
           callSessionManager.updateCollectedData(event.CallSid, {});
         }
 
-        // ⚠️ CRITICAL FIX: Get FRESH session data after potential clearing
-        // The old 'session' variable is stale if we just cleared data above
-        const freshSession = callSessionManager.getSession(event.CallSid);
-        if (!freshSession) {
-          reply.type('text/xml');
-          return twilioService.createSayAndHangup('Es tut mir leid, ein Fehler ist aufgetreten.');
-        }
-        
-        const currentData = freshSession.collectedData || {};
+        // Check if we're already in appointment booking mode
+        const currentData = session.collectedData || {};
         const hasPartialAppointmentData = 
           currentData.date || 
           currentData.time || 
           currentData.name || 
-          (currentData.phone && currentData.phone !== freshSession.callerNumber);
+          (currentData.phone && currentData.phone !== session.callerNumber);
 
         let intentResult;
 
         if (hasPartialAppointmentData && !isRequestingNewAppointment) {
-          // Already booking - force appointment intent
+          // We're already booking an appointment - skip intent classification
           console.log('Partial appointment data detected, forcing appointment_booking intent');
-          fastify.log.info({ currentData }, 'Forcing appointment_booking intent');
+          fastify.log.info({ currentData }, 'Forcing appointment_booking intent due to partial data');
           intentResult = {
             intent: 'appointment_booking',
             confidence: 1.0,
@@ -234,7 +227,7 @@ export async function webhookRoutes(fastify: FastifyInstance) {
           // Normal intent classification
           intentResult = await intentClassifier.classify(
             userSpeech,
-            freshSession.conversationHistory
+            session.conversationHistory
           );
         }
 
@@ -247,7 +240,7 @@ export async function webhookRoutes(fastify: FastifyInstance) {
         const shouldEscalate = intentClassifier.shouldEscalate(
           intentResult.intent,
           intentResult.confidence,
-          freshSession.conversationHistory,
+          session.conversationHistory,
           client.escalationRules
         );
 
@@ -261,24 +254,31 @@ export async function webhookRoutes(fastify: FastifyInstance) {
 
         // Handle appointment booking
         if (intentResult.intent === 'appointment_booking') {
-          // INCREMENTAL EXTRACTION: Extract from ONLY the current user message
-          console.log('Using incremental extraction for:', userSpeech);
-          console.log('Existing data:', currentData);
+          // Get conversation history for appointment extraction
+          // If we just cleared data for new appointment, only look at messages AFTER the clear
+          let historyForExtraction = session.conversationHistory;
+          let messageLimit: number | undefined = undefined;
           
-          const updatedData = await incrementalExtractor.extractFromSingleMessage(
-            userSpeech,
-            currentData
+          if (isRequestingNewAppointment) {
+            // Only look at the current exchange for new appointment
+            historyForExtraction = session.conversationHistory.slice(-2);
+            messageLimit = 2; // Explicitly tell extractor to use only 2 messages
+            console.log('New appointment: using only last 2 messages for extraction');
+          }
+
+          // Extract appointment details
+          const appointmentData = await appointmentHandler.extractDetails(
+            historyForExtraction,
+            messageLimit
           );
 
-          console.log('Updated data after extraction:', updatedData);
-          
-          // Update session with new data
-          callSessionManager.updateCollectedData(event.CallSid, updatedData);
+          callSessionManager.updateCollectedData(event.CallSid, appointmentData);
 
           // Check if we have all required fields
-          if (incrementalExtractor.hasAllFields(updatedData)) {
+          if (appointmentHandler.hasRequiredFields(appointmentData)) {
             // Create appointment
             try {
+              // Get the Call database record
               if (!call) {
                 throw new Error('Call record not found');
               }
@@ -286,10 +286,10 @@ export async function webhookRoutes(fastify: FastifyInstance) {
               await appointmentHandler.createAppointment(
                 call.id,
                 client.id,
-                updatedData
+                appointmentData
               );
 
-              const confirmation = appointmentHandler.generateConfirmation(updatedData);
+              const confirmation = appointmentHandler.generateConfirmation(appointmentData);
               await callSessionManager.addMessage(event.CallSid, 'assistant', confirmation);
 
               // Save confirmation message
@@ -301,7 +301,7 @@ export async function webhookRoutes(fastify: FastifyInstance) {
                 },
               });
 
-              // Clear collected data after successful booking
+              // CRITICAL: Clear collected data after successful booking
               callSessionManager.updateCollectedData(event.CallSid, {});
               console.log('Appointment created successfully, cleared collected data');
 
@@ -314,6 +314,7 @@ export async function webhookRoutes(fastify: FastifyInstance) {
             } catch (err) {
               fastify.log.error({ err }, 'Failed to create appointment');
               
+              // If appointment creation fails, inform user and continue conversation
               const errorMessage = 'Entschuldigung, es gab ein Problem beim Speichern des Termins. Bitte versuchen Sie es später erneut oder rufen Sie uns direkt an.';
               await callSessionManager.addMessage(event.CallSid, 'assistant', errorMessage);
               
@@ -334,8 +335,9 @@ export async function webhookRoutes(fastify: FastifyInstance) {
               );
             }
           } else {
-            // Ask for next missing field
-            const prompt = incrementalExtractor.generatePromptForNextField(updatedData);
+            // Ask for missing information
+            const missingFields = appointmentHandler.getMissingFields(appointmentData);
+            const prompt = appointmentHandler.generateCollectionPrompt(missingFields);
             
             await callSessionManager.addMessage(event.CallSid, 'assistant', prompt);
 
@@ -364,12 +366,13 @@ export async function webhookRoutes(fastify: FastifyInstance) {
           companyName: client.name || defaultBusinessContext.companyName,
         };
 
+        // Generate the strong receptionist prompt
         const systemPrompt = buildReceptionistPrompt(businessContext);
 
-        // Generate AI response using Claude
+        // Generate AI response using Claude with the proper prompt
         const aiResponse = await claudeService.generateResponse(
           systemPrompt,
-          freshSession.conversationHistory,
+          session.conversationHistory,
           userSpeech
         );
 
@@ -405,7 +408,7 @@ export async function webhookRoutes(fastify: FastifyInstance) {
 
   /**
    * POST /webhooks/twilio/status
-   * Called when call status changes
+   * Called when call status changes (answered, completed, etc.)
    */
   fastify.post(
     '/webhooks/twilio/status',
@@ -415,6 +418,7 @@ export async function webhookRoutes(fastify: FastifyInstance) {
         
         fastify.log.info({ event }, 'Call status update');
 
+        // Update call status in database
         await prisma.call.updateMany({
           where: { callSid: event.CallSid },
           data: {
@@ -424,9 +428,11 @@ export async function webhookRoutes(fastify: FastifyInstance) {
           },
         });
 
+        // If call completed, end session
         if (event.CallStatus === 'completed') {
           const session = callSessionManager.endSession(event.CallSid);
           
+          // Log completion
           await prisma.systemEvent.create({
             data: {
               eventType: 'call_ended',
@@ -447,12 +453,13 @@ export async function webhookRoutes(fastify: FastifyInstance) {
         fastify.log.error({ err }, 'Error handling status callback');
         reply.code(500);
         return { error: 'Internal server error' };
-      }
+        }
     }
   );
 
   /**
    * GET /webhooks/twilio/test
+   * Test endpoint to verify webhooks are working
    */
   fastify.get('/webhooks/twilio/test', async (_request, _reply) => {
     return {
