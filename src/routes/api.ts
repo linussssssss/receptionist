@@ -91,7 +91,7 @@ export async function apiRoutes(fastify: FastifyInstance) {
     } catch (err) {
       if (err instanceof z.ZodError) {
         reply.code(400);
-        return { error: 'Invalid query parameters', details: err.errors };
+        return { error: 'Invalid query parameters', details: err.issues };
       }
       throw err;
     }
@@ -174,7 +174,7 @@ export async function apiRoutes(fastify: FastifyInstance) {
     } catch (err) {
       if (err instanceof z.ZodError) {
         reply.code(400);
-        return { error: 'Invalid query parameters', details: err.errors };
+        return { error: 'Invalid query parameters', details: err.issues };
       }
       throw err;
     }
@@ -242,17 +242,28 @@ export async function apiRoutes(fastify: FastifyInstance) {
         }),
 
         // Calls per day (for chart)
-        prisma.$queryRaw`
-          SELECT
-            DATE("startTime") as date,
-            COUNT(*)::int as count
-          FROM "Call"
-          WHERE "startTime" >= ${startDate}
-            AND "startTime" <= ${endDate}
-            ${clientId ? prisma.$queryRaw`AND "clientId" = ${clientId}` : prisma.$queryRaw``}
-          GROUP BY DATE("startTime")
-          ORDER BY date ASC
-        ` as Promise<{ date: Date; count: number }[]>,
+        clientId
+          ? prisma.$queryRaw`
+              SELECT
+                DATE("startTime") as date,
+                COUNT(*)::int as count
+              FROM "Call"
+              WHERE "startTime" >= ${startDate}
+                AND "startTime" <= ${endDate}
+                AND "clientId" = ${clientId}
+              GROUP BY DATE("startTime")
+              ORDER BY date ASC
+            ` as Promise<{ date: Date; count: number }[]>
+          : prisma.$queryRaw`
+              SELECT
+                DATE("startTime") as date,
+                COUNT(*)::int as count
+              FROM "Call"
+              WHERE "startTime" >= ${startDate}
+                AND "startTime" <= ${endDate}
+              GROUP BY DATE("startTime")
+              ORDER BY date ASC
+            ` as Promise<{ date: Date; count: number }[]>,
       ]);
 
       // Calculate appointment booking rate
@@ -287,7 +298,7 @@ export async function apiRoutes(fastify: FastifyInstance) {
     } catch (err) {
       if (err instanceof z.ZodError) {
         reply.code(400);
-        return { error: 'Invalid query parameters', details: err.errors };
+        return { error: 'Invalid query parameters', details: err.issues };
       }
       throw err;
     }

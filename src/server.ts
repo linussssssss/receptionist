@@ -4,6 +4,7 @@ import websocket from '@fastify/websocket';
 import { env } from './config/env.js';
 import { PrismaClient } from '@prisma/client';
 import { webhookRoutes } from './routes/webhooks.js';
+import { apiRoutes } from './routes/api.js';
 import fastifyFormbody from '@fastify/formbody';
 
 // Initialize Prisma Client
@@ -49,6 +50,7 @@ await fastify.register(websocket, {
 
 // Register routes
 await fastify.register(webhookRoutes);
+await fastify.register(apiRoutes);
 
 // Health check endpoint
 fastify.get('/health', async (_request, reply) => {
@@ -82,7 +84,14 @@ fastify.get('/', async (_request, _reply) => {
     endpoints: {
       health: '/health',
       webhooks: '/webhooks/*',
-      api: '/api/*',
+      api: {
+        calls: 'GET /api/calls',
+        callDetails: 'GET /api/calls/:id',
+        appointments: 'GET /api/appointments',
+        analytics: 'GET /api/analytics',
+        settings: 'GET /api/client/settings',
+        updateSettings: 'PUT /api/client/settings',
+      },
     },
   };
 });
