@@ -4,8 +4,8 @@ import { prisma } from '../server.js';
 
 // Query parameter schemas
 const paginationSchema = z.object({
-  page: z.string().optional().transform(val => parseInt(val || '1', 10)),
-  limit: z.string().optional().transform(val => parseInt(val || '20', 10)),
+  page: z.string().optional().default('1').transform(Number),
+  limit: z.string().optional().default('20').transform(Number),
 });
 
 const callsQuerySchema = paginationSchema.extend({
@@ -33,7 +33,7 @@ const updateClientSettingsSchema = z.object({
   name: z.string().min(1).optional(),
   greetingMessage: z.string().min(1).optional(),
   llmSystemPrompt: z.string().optional(),
-  businessHours: z.any().optional(), // JsonValue from Prisma
+  businessHours: z.any().optional(), // JsonValue type from Prisma
   escalationRules: z.any().optional(),
   voiceId: z.string().optional(),
   isActive: z.boolean().optional(),
@@ -91,7 +91,7 @@ export async function apiRoutes(fastify: FastifyInstance) {
     } catch (err) {
       if (err instanceof z.ZodError) {
         reply.code(400);
-        return { error: 'Invalid query parameters', details: err.errors };
+        return { error: 'Invalid query parameters', details: err.issues };
       }
       throw err;
     }
@@ -174,7 +174,7 @@ export async function apiRoutes(fastify: FastifyInstance) {
     } catch (err) {
       if (err instanceof z.ZodError) {
         reply.code(400);
-        return { error: 'Invalid query parameters', details: err.errors };
+        return { error: 'Invalid query parameters', details: err.issues };
       }
       throw err;
     }
@@ -242,17 +242,28 @@ export async function apiRoutes(fastify: FastifyInstance) {
         }),
 
         // Calls per day (for chart)
-        prisma.$queryRaw`
-          SELECT
-            DATE("startTime") as date,
-            COUNT(*)::int as count
-          FROM "Call"
-          WHERE "startTime" >= ${startDate}
-            AND "startTime" <= ${endDate}
-            ${clientId ? prisma.$queryRaw`AND "clientId" = ${clientId}` : prisma.$queryRaw``}
-          GROUP BY DATE("startTime")
-          ORDER BY date ASC
-        ` as Promise<{ date: Date; count: number }[]>,
+        clientId
+          ? prisma.$queryRaw`
+              SELECT
+                DATE("startTime") as date,
+                COUNT(*)::int as count
+              FROM "Call"
+              WHERE "startTime" >= ${startDate}
+                AND "startTime" <= ${endDate}
+                AND "clientId" = ${clientId}
+              GROUP BY DATE("startTime")
+              ORDER BY date ASC
+            ` as Promise<{ date: Date; count: number }[]>
+          : prisma.$queryRaw`
+              SELECT
+                DATE("startTime") as date,
+                COUNT(*)::int as count
+              FROM "Call"
+              WHERE "startTime" >= ${startDate}
+                AND "startTime" <= ${endDate}
+              GROUP BY DATE("startTime")
+              ORDER BY date ASC
+            ` as Promise<{ date: Date; count: number }[]>,
       ]);
 
       // Calculate appointment booking rate
@@ -287,7 +298,7 @@ export async function apiRoutes(fastify: FastifyInstance) {
     } catch (err) {
       if (err instanceof z.ZodError) {
         reply.code(400);
-        return { error: 'Invalid query parameters', details: err.errors };
+        return { error: 'Invalid query parameters', details: err.issues };
       }
       throw err;
     }
@@ -386,14 +397,14 @@ export async function apiRoutes(fastify: FastifyInstance) {
     } catch (err) {
       if (err instanceof z.ZodError) {
         reply.code(400);
-        return { error: 'Invalid request body', details: err.errors };
+        return { error: 'Invalid request body', details: err.issues };
       }
       throw err;
     }
   });
 
   /**
-   * GET /api/client/settings/test-greeting
+   * POST /api/client/settings/test-greeting
    * Preview how the greeting would sound (returns TTS URL or text)
    */
   fastify.post('/api/client/settings/test-greeting', async (request: FastifyRequest, reply: FastifyReply) => {
