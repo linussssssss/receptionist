@@ -549,7 +549,7 @@ export async function apiRoutes(fastify: FastifyInstance) {
    * POST /api/client/settings/test-greeting
    * Preview how the greeting would sound (returns TTS URL or text)
    */
-  fastify.post('/api/client/settings/test-greeting', async (request: FastifyRequest) => {
+  fastify.post('/api/client/settings/test-greeting', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = z.object({ message: z.string().min(1) }).parse(request.body);
 
     // For now, just return the text. In production, this could:
