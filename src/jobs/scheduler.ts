@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { logger } from '../utils/logger.js';
 import { webhookRenewalJob } from './webhook-renewal.job.js';
 import { syncRetryJob } from './sync-retry.job.js';
+import { appointmentReminderJob } from './appointment-reminder.job.js';
 
 export interface ScheduledJob {
   name: string;
@@ -9,7 +10,11 @@ export interface ScheduledJob {
   handler: () => Promise<void>;
 }
 
-const jobs: ScheduledJob[] = [webhookRenewalJob, syncRetryJob];
+const jobs: ScheduledJob[] = [
+  webhookRenewalJob,
+  syncRetryJob,
+  appointmentReminderJob,
+];
 
 const scheduledTasks: cron.ScheduledTask[] = [];
 

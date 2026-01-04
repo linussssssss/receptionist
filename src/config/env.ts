@@ -36,6 +36,10 @@ const envSchema = z.object({
   GOOGLE_CALENDAR_WEBHOOK_URL: z.string().optional(),
   HUBSPOT_API_KEY: z.string().optional(),
 
+  // Email (Resend)
+  RESEND_API_KEY: z.string().min(1),
+  RESEND_FROM_EMAIL: z.string().email(),
+
   // Monitoring
   SENTRY_DSN: z.string().optional(),
 

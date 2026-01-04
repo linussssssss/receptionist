@@ -327,16 +327,41 @@ export class GoogleCalendarService {
     const endTime = new Date(event.end.dateTime);
     const durationMinutes = Math.round((endTime.getTime() - startTime.getTime()) / (1000 * 60));
 
-    // Try to extract customer info from description
+    // Extract customer email - try multiple sources
+    let customerEmail: string | undefined;
+
+    // 1. Check if event has attendees (guests added to the event)
+    if (event.attendees && event.attendees.length > 0) {
+      // Use the first attendee's email
+      customerEmail = event.attendees[0].email;
+    }
+
+    // 2. Try to extract from description if no attendees
+    if (!customerEmail) {
+      const description = event.description || '';
+
+      // Try structured format first: "Email: xxx"
+      const emailMatch = description.match(/Email:\s*(.+)/i);
+      if (emailMatch) {
+        customerEmail = emailMatch[1].trim();
+      } else {
+        // Try to find any email address in the description using general regex
+        const generalEmailMatch = description.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/);
+        if (generalEmailMatch) {
+          customerEmail = generalEmailMatch[1].trim();
+        }
+      }
+    }
+
+    // Extract other customer info from description
     const description = event.description || '';
     const phoneMatch = description.match(/Phone:\s*(.+)/i);
-    const emailMatch = description.match(/Email:\s*(.+)/i);
     const reasonMatch = description.match(/Reason:\s*(.+)/i);
 
     return {
       customerName: event.summary || 'Unknown',
       customerPhone: phoneMatch ? phoneMatch[1].trim() : '',
-      customerEmail: emailMatch ? emailMatch[1].trim() : undefined,
+      customerEmail: customerEmail,
       datetime: startTime,
       durationMinutes,
       reason: reasonMatch ? reasonMatch[1].trim() : undefined,
