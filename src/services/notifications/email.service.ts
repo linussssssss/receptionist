@@ -2,6 +2,7 @@ import { Resend } from 'resend';
 import { env } from '../../config/env.js';
 import { createServiceLogger } from '../../utils/logger.js';
 import { generateAppointmentReminderEmail } from './templates/appointment-reminder.js';
+import { generateAppointmentConfirmationEmail } from './templates/appointment-confirmation.js';
 import type { Appointment, Client } from '@prisma/client';
 
 export interface EmailResult {
@@ -93,6 +94,81 @@ export class EmailService {
           appointmentId: appointment.id,
         },
         'Failed to send appointment reminder email'
+      );
+
+      return {
+        success: false,
+        error: err.message || 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Send appointment confirmation email
+   */
+  async sendAppointmentConfirmation(
+    appointment: Appointment & { client: Pick<Client, 'id' | 'name' | 'phoneNumber'> }
+  ): Promise<EmailResult> {
+    try {
+      // Validate customer email
+      if (!appointment.customerEmail) {
+        return {
+          success: false,
+          error: 'No customer email provided',
+        };
+      }
+
+      // Format date and time
+      const appointmentDate = new Date(appointment.datetime);
+      const formattedDate = appointmentDate.toLocaleDateString('de-DE', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+      const formattedTime = appointmentDate.toLocaleTimeString('de-DE', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+      // Generate email content
+      const { subject, html, text } = generateAppointmentConfirmationEmail({
+        customerName: appointment.customerName,
+        appointmentDate: formattedDate,
+        appointmentTime: formattedTime,
+        durationMinutes: appointment.durationMinutes,
+        reason: appointment.reason || undefined,
+        clientName: appointment.client.name,
+        clientPhone: appointment.client.phoneNumber || undefined,
+      });
+
+      // Send email via Resend
+      const result = await this.sendEmail(
+        appointment.customerEmail,
+        subject,
+        html,
+        text
+      );
+
+      if (result.success) {
+        this.logger.info(
+          {
+            appointmentId: appointment.id,
+            customerEmail: appointment.customerEmail,
+            messageId: result.messageId,
+          },
+          'Appointment confirmation email sent successfully'
+        );
+      }
+
+      return result;
+    } catch (err: any) {
+      this.logger.error(
+        {
+          err,
+          appointmentId: appointment.id,
+        },
+        'Failed to send appointment confirmation email'
       );
 
       return {

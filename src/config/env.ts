@@ -39,6 +39,10 @@ const envSchema = z.object({
   // Email (Resend)
   RESEND_API_KEY: z.string().min(1),
   RESEND_FROM_EMAIL: z.string().email(),
+  ENABLE_APPOINTMENT_REMINDERS: z
+    .string()
+    .default('false')
+    .transform((val) => val === 'true'),
 
   // Monitoring
   SENTRY_DSN: z.string().optional(),

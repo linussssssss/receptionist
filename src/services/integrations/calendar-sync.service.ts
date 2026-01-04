@@ -1,5 +1,7 @@
 import { prisma } from '../../server.js';
 import { googleCalendarService } from './google-calendar.service.js';
+import { emailService } from '../notifications/email.service.js';
+import { logger } from '../../utils/logger.js';
 import type { CalendarSyncOperation, GoogleCalendarEvent } from '../../types/google-calendar.js';
 
 export class CalendarSyncService {
@@ -176,6 +178,15 @@ export class CalendarSyncService {
                 status: 'PENDING',
                 calendarId: eventId,
               },
+              include: {
+                client: {
+                  select: {
+                    id: true,
+                    name: true,
+                    phoneNumber: true,
+                  },
+                },
+              },
             });
 
             // Create sync log
@@ -189,6 +200,32 @@ export class CalendarSyncService {
                 calendarEventId: eventId,
               },
             });
+
+            // Send confirmation email if customer has email
+            if (newAppointment.customerEmail) {
+              logger.info(
+                { appointmentId: newAppointment.id, source: 'calendar-sync' },
+                'Sending confirmation email for calendar-synced appointment'
+              );
+
+              // Fire and forget - don't wait for email to complete
+              emailService
+                .sendAppointmentConfirmation(newAppointment)
+                .then((result) => {
+                  if (!result.success) {
+                    logger.error(
+                      { appointmentId: newAppointment.id, error: result.error },
+                      'Failed to send confirmation email for calendar-synced appointment'
+                    );
+                  }
+                })
+                .catch((err) => {
+                  logger.error(
+                    { err, appointmentId: newAppointment.id },
+                    'Error sending confirmation email for calendar-synced appointment'
+                  );
+                });
+            }
           }
           break;
 

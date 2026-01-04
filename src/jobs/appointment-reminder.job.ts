@@ -1,17 +1,28 @@
 import { prisma } from '../server.js';
 import { emailService } from '../services/notifications/email.service.js';
 import { logger } from '../utils/logger.js';
+import { env } from '../config/env.js';
 
 /**
  * Appointment Reminder Job
  *
- * Sends email reminders for appointments that haven't been reminded yet.
- * For testing: Runs every 2 minutes to catch new appointments quickly.
- * For production: Should be configured to run at appropriate intervals.
+ * Sends email reminders 24 hours before appointments.
+ * Can be disabled via ENABLE_APPOINTMENT_REMINDERS environment variable.
  */
 
 export async function sendAppointmentReminders(): Promise<void> {
   try {
+    // Check if reminders are enabled
+    if (!env.ENABLE_APPOINTMENT_REMINDERS) {
+      logger.debug('Appointment reminders are disabled via environment variable');
+      return;
+    }
+
+    // Calculate time window: 23-25 hours from now (24h ± 1h)
+    const now = new Date();
+    const windowStart = new Date(now.getTime() + 23 * 60 * 60 * 1000); // 23 hours from now
+    const windowEnd = new Date(now.getTime() + 25 * 60 * 60 * 1000); // 25 hours from now
+
     // Find appointments that need reminders
     const appointmentsToRemind = await prisma.appointment.findMany({
       where: {
@@ -22,6 +33,10 @@ export async function sendAppointmentReminders(): Promise<void> {
         ],
         status: {
           in: ['PENDING', 'CONFIRMED'], // Don't remind cancelled/completed appointments
+        },
+        datetime: {
+          gte: windowStart, // Appointment is at least 23 hours away
+          lte: windowEnd, // Appointment is at most 25 hours away
         },
       },
       include: {
@@ -128,9 +143,8 @@ export async function sendAppointmentReminders(): Promise<void> {
 // Export job configuration
 export const appointmentReminderJob = {
   name: 'appointment-reminder',
-  schedule: '*/2 * * * *', // Every 2 minutes for testing
-  // For production, consider:
-  // '*/15 * * * *' - Every 15 minutes
-  // '0 * * * *' - Every hour
+  schedule: '*/15 * * * *', // Every 15 minutes (checks for appointments 24h away)
+  // Runs every 15 minutes to check for appointments in the 23-25 hour window
+  // Set ENABLE_APPOINTMENT_REMINDERS=true in .env to enable
   handler: sendAppointmentReminders,
 };

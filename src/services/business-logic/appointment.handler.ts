@@ -1,6 +1,8 @@
 // appointment.handler.ts - FIXED VERSION
 import { claudeService } from '../ai/claude.service.js';
 import { prisma } from '../../server.js';
+import { emailService } from '../notifications/email.service.js';
+import { logger } from '../../utils/logger.js';
 
 interface AppointmentData {
   date?: string;      // ISO date (YYYY-MM-DD)
@@ -96,7 +98,7 @@ export class AppointmentHandler {
     // Combine date and time into ISO timestamp
     const scheduledTime = new Date(`${data.date}T${data.time}:00.000Z`);
 
-    return await prisma.appointment.create({
+    const appointment = await prisma.appointment.create({
       data: {
         callId,
         clientId,
@@ -106,7 +108,44 @@ export class AppointmentHandler {
         status: 'CONFIRMED',
         notes: 'Über Telefon vereinbart',
       },
+      include: {
+        client: {
+          select: {
+            id: true,
+            name: true,
+            phoneNumber: true,
+          },
+        },
+      },
     });
+
+    // Send confirmation email if customer has email
+    if (appointment.customerEmail) {
+      logger.info(
+        { appointmentId: appointment.id },
+        'Sending confirmation email for new appointment'
+      );
+
+      // Fire and forget - don't wait for email to complete
+      emailService
+        .sendAppointmentConfirmation(appointment)
+        .then((result) => {
+          if (!result.success) {
+            logger.error(
+              { appointmentId: appointment.id, error: result.error },
+              'Failed to send confirmation email'
+            );
+          }
+        })
+        .catch((err) => {
+          logger.error(
+            { err, appointmentId: appointment.id },
+            'Error sending confirmation email'
+          );
+        });
+    }
+
+    return appointment;
   }
 
   /**

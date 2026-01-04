@@ -63,6 +63,8 @@ export interface Appointment {
   reason: string | null;
   notes: string | null;
   status: string;
+  reminderSent: boolean;
+  reminderSentAt: string | null;
   client: {
     id: string;
     name: string;

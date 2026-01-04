@@ -20,7 +20,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ChevronLeft, ChevronRight, Filter, Calendar, Phone, MoreVertical, Edit, XCircle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Filter, Calendar, Phone, MoreVertical, Edit, XCircle, Mail, Bell, BellOff, Clock } from 'lucide-react';
 
 const STATUS_COLORS: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   PENDING: 'outline',
@@ -59,6 +59,13 @@ export default function AppointmentsPage() {
     }
 
     fetchAppointments();
+
+    // Auto-refresh every 30 seconds
+    const interval = setInterval(() => {
+      fetchAppointments();
+    }, 30000);
+
+    return () => clearInterval(interval);
   }, [page, statusFilter]);
 
   const formatDate = (dateString: string) => {
@@ -167,7 +174,9 @@ export default function AppointmentsPage() {
                 <TableRow>
                   <TableHead>Date & Time</TableHead>
                   <TableHead>Customer</TableHead>
+                  <TableHead>Email</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Reminder</TableHead>
                   <TableHead>Client</TableHead>
                   <TableHead>Duration</TableHead>
                   <TableHead>Call</TableHead>
@@ -177,7 +186,7 @@ export default function AppointmentsPage() {
               <TableBody>
                 {appointments.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-gray-500">
+                    <TableCell colSpan={9} className="text-center text-gray-500">
                       No appointments found
                     </TableCell>
                   </TableRow>
@@ -205,9 +214,45 @@ export default function AppointmentsPage() {
                         </div>
                       </TableCell>
                       <TableCell>
+                        {appointment.customerEmail ? (
+                          <div className="flex items-center gap-1 text-sm text-gray-700">
+                            <Mail className="h-3 w-3 text-gray-400" />
+                            <span className="max-w-[150px] truncate" title={appointment.customerEmail}>
+                              {appointment.customerEmail}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-gray-400">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
                         <Badge variant={STATUS_COLORS[appointment.status] || 'outline'}>
                           {appointment.status}
                         </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {appointment.customerEmail ? (
+                          appointment.reminderSent ? (
+                            <div className="flex items-center gap-1">
+                              <Badge variant="secondary" className="flex items-center gap-1">
+                                <Bell className="h-3 w-3" />
+                                Sent
+                              </Badge>
+                              {appointment.reminderSentAt && (
+                                <span className="text-xs text-gray-400" title={new Date(appointment.reminderSentAt).toLocaleString('de-DE')}>
+                                  <Clock className="h-3 w-3 inline" />
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <Badge variant="outline" className="flex items-center gap-1">
+                              <BellOff className="h-3 w-3" />
+                              Pending
+                            </Badge>
+                          )
+                        ) : (
+                          <span className="text-sm text-gray-400">N/A</span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <span className="text-sm">{appointment.client.name}</span>
