@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../server.js';
+import { calendarSyncService } from '../services/integrations/calendar-sync.service.js';
 
 // Query parameter schemas
 const paginationSchema = z.object({
@@ -27,6 +28,17 @@ const analyticsQuerySchema = z.object({
   from: z.string().optional(),
   to: z.string().optional(),
   clientId: z.string().optional(),
+});
+
+const updateAppointmentSchema = z.object({
+  customerName: z.string().optional(),
+  customerPhone: z.string().optional(),
+  customerEmail: z.string().email().optional().nullable(),
+  datetime: z.string().datetime().optional(),
+  durationMinutes: z.number().int().positive().optional(),
+  reason: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+  status: z.enum(['PENDING', 'CONFIRMED', 'CANCELLED', 'COMPLETED', 'NO_SHOW', 'RESCHEDULED']).optional(),
 });
 
 const updateClientSettingsSchema = z.object({
@@ -176,6 +188,136 @@ export async function apiRoutes(fastify: FastifyInstance) {
         reply.code(400);
         return { error: 'Invalid query parameters', details: err.issues };
       }
+      throw err;
+    }
+  });
+
+  /**
+   * GET /api/appointments/:id
+   * Get a single appointment by ID
+   */
+  fastify.get('/api/appointments/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    const { id } = request.params;
+
+    const appointment = await prisma.appointment.findUnique({
+      where: { id },
+      include: {
+        client: { select: { id: true, name: true } },
+        call: { select: { id: true, callSid: true, callerNumber: true } },
+      },
+    });
+
+    if (!appointment) {
+      reply.code(404);
+      return { error: 'Appointment not found' };
+    }
+
+    return { data: appointment };
+  });
+
+  /**
+   * PATCH /api/appointments/:id
+   * Update an appointment
+   */
+  fastify.patch('/api/appointments/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    try {
+      const { id } = request.params;
+      const updates = updateAppointmentSchema.parse(request.body);
+
+      // Check if appointment exists
+      const existingAppointment = await prisma.appointment.findUnique({
+        where: { id },
+        include: { client: true },
+      });
+
+      if (!existingAppointment) {
+        reply.code(404);
+        return { error: 'Appointment not found' };
+      }
+
+      // Prepare update data
+      const updateData: any = { ...updates };
+      if (updates.datetime) {
+        updateData.datetime = new Date(updates.datetime);
+      }
+
+      // Update appointment
+      const updatedAppointment = await prisma.appointment.update({
+        where: { id },
+        data: updateData,
+        include: {
+          client: { select: { id: true, name: true } },
+          call: { select: { id: true, callSid: true, callerNumber: true } },
+        },
+      });
+
+      // Sync to Google Calendar if enabled
+      if (existingAppointment.client.integrations) {
+        const googleCalendarConfig = (existingAppointment.client.integrations as any)?.googleCalendar;
+        if (googleCalendarConfig?.enabled && updatedAppointment.calendarId) {
+          // Sync in background - don't block appointment update
+          calendarSyncService.syncAppointmentToCalendar(updatedAppointment.id, 'UPDATE')
+            .catch(err => {
+              request.log.error({ err, appointmentId: updatedAppointment.id },
+                'Failed to sync appointment update to Google Calendar');
+            });
+        }
+      }
+
+      return { data: updatedAppointment };
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        reply.code(400);
+        return { error: 'Invalid request data', details: err.issues };
+      }
+      throw err;
+    }
+  });
+
+  /**
+   * DELETE /api/appointments/:id
+   * Cancel an appointment
+   */
+  fastify.delete('/api/appointments/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    try {
+      const { id } = request.params;
+
+      // Check if appointment exists
+      const existingAppointment = await prisma.appointment.findUnique({
+        where: { id },
+        include: { client: true },
+      });
+
+      if (!existingAppointment) {
+        reply.code(404);
+        return { error: 'Appointment not found' };
+      }
+
+      // Sync deletion to Google Calendar if enabled
+      if (existingAppointment.client.integrations) {
+        const googleCalendarConfig = (existingAppointment.client.integrations as any)?.googleCalendar;
+        if (googleCalendarConfig?.enabled && existingAppointment.calendarId) {
+          // Sync in background - don't block appointment deletion
+          calendarSyncService.syncAppointmentToCalendar(existingAppointment.id, 'DELETE')
+            .catch(err => {
+              request.log.error({ err, appointmentId: existingAppointment.id },
+                'Failed to sync appointment deletion to Google Calendar');
+            });
+        }
+      }
+
+      // Mark as cancelled instead of deleting
+      const cancelledAppointment = await prisma.appointment.update({
+        where: { id },
+        data: { status: 'CANCELLED' },
+        include: {
+          client: { select: { id: true, name: true } },
+          call: { select: { id: true, callSid: true, callerNumber: true } },
+        },
+      });
+
+      return { data: cancelledAppointment, message: 'Appointment cancelled successfully' };
+    } catch (err) {
       throw err;
     }
   });

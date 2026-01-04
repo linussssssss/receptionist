@@ -20,7 +20,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ChevronLeft, ChevronRight, Filter, Calendar, Phone } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Filter, Calendar, Phone, MoreVertical, Edit, XCircle } from 'lucide-react';
 
 const STATUS_COLORS: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   PENDING: 'outline',
@@ -69,6 +69,27 @@ export default function AppointmentsPage() {
       hour: '2-digit',
       minute: '2-digit',
     });
+  };
+
+  const handleCancelAppointment = async (id: string) => {
+    if (!confirm('Are you sure you want to cancel this appointment?')) {
+      return;
+    }
+
+    try {
+      await api.cancelAppointment(id);
+      // Refresh the appointments list
+      const response = await api.getAppointments({
+        page,
+        limit: 20,
+        status: statusFilter,
+      });
+      setAppointments(response.data);
+      setTotalPages(response.pagination?.totalPages || 1);
+    } catch (err) {
+      alert('Failed to cancel appointment');
+      console.error(err);
+    }
   };
 
   if (loading) {
@@ -150,12 +171,13 @@ export default function AppointmentsPage() {
                   <TableHead>Client</TableHead>
                   <TableHead>Duration</TableHead>
                   <TableHead>Call</TableHead>
+                  <TableHead className="w-[50px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {appointments.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-gray-500">
+                    <TableCell colSpan={7} className="text-center text-gray-500">
                       No appointments found
                     </TableCell>
                   </TableRow>
@@ -205,6 +227,32 @@ export default function AppointmentsPage() {
                         ) : (
                           <span className="text-sm text-gray-400">-</span>
                         )}
+                      </TableCell>
+                      <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              onClick={() => router.push(`/appointments/${appointment.id}/edit`)}
+                              disabled={appointment.status === 'CANCELLED' || appointment.status === 'COMPLETED'}
+                            >
+                              <Edit className="mr-2 h-4 w-4" />
+                              Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleCancelAppointment(appointment.id)}
+                              disabled={appointment.status === 'CANCELLED' || appointment.status === 'COMPLETED'}
+                              className="text-red-600"
+                            >
+                              <XCircle className="mr-2 h-4 w-4" />
+                              Cancel
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </TableCell>
                     </TableRow>
                   ))

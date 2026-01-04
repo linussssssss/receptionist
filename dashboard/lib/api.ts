@@ -109,12 +109,16 @@ export interface ClientSettings {
 }
 
 async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  const headers: HeadersInit = { ...options?.headers };
+
+  // Only set Content-Type if there's a body
+  if (options?.body) {
+    headers['Content-Type'] = 'application/json';
+  }
+
   const response = await fetch(`${API_URL}${endpoint}`, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
+    headers,
   });
 
   if (!response.ok) {
@@ -168,6 +172,30 @@ export const api = {
     }
     const query = searchParams.toString();
     return fetchApi<ApiResponse<Appointment[]>>(`/api/appointments${query ? `?${query}` : ''}`);
+  },
+
+  getAppointment: (id: string) => fetchApi<ApiResponse<Appointment>>(`/api/appointments/${id}`),
+
+  updateAppointment: (id: string, data: {
+    customerName?: string;
+    customerPhone?: string;
+    customerEmail?: string | null;
+    datetime?: string;
+    durationMinutes?: number;
+    reason?: string | null;
+    notes?: string | null;
+    status?: string;
+  }) => {
+    return fetchApi<ApiResponse<Appointment>>(`/api/appointments/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+
+  cancelAppointment: (id: string) => {
+    return fetchApi<ApiResponse<Appointment>>(`/api/appointments/${id}`, {
+      method: 'DELETE',
+    });
   },
 
   // Analytics
