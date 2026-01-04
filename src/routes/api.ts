@@ -351,6 +351,10 @@ export async function apiRoutes(fastify: FastifyInstance) {
         avgDuration,
         appointmentsCreated,
         callsPerDay,
+        appointmentsByStatus,
+        callsByHour,
+        uniqueCustomers,
+        returningCustomers,
       ] = await Promise.all([
         // Total calls
         prisma.call.count({ where }),
@@ -406,12 +410,66 @@ export async function apiRoutes(fastify: FastifyInstance) {
               GROUP BY DATE("startTime")
               ORDER BY date ASC
             ` as Promise<{ date: Date; count: number }[]>,
+
+        // Appointments by status
+        prisma.appointment.groupBy({
+          by: ['status'],
+          where: {
+            createdAt: { gte: startDate, lte: endDate },
+            ...(clientId ? { clientId } : {}),
+          },
+          _count: { status: true },
+        }),
+
+        // Calls by hour (peak times)
+        clientId
+          ? prisma.$queryRaw`
+              SELECT
+                EXTRACT(HOUR FROM "startTime")::int as hour,
+                COUNT(*)::int as count
+              FROM "Call"
+              WHERE "startTime" >= ${startDate}
+                AND "startTime" <= ${endDate}
+                AND "clientId" = ${clientId}
+              GROUP BY EXTRACT(HOUR FROM "startTime")
+              ORDER BY hour ASC
+            ` as Promise<{ hour: number; count: number }[]>
+          : prisma.$queryRaw`
+              SELECT
+                EXTRACT(HOUR FROM "startTime")::int as hour,
+                COUNT(*)::int as count
+              FROM "Call"
+              WHERE "startTime" >= ${startDate}
+                AND "startTime" <= ${endDate}
+              GROUP BY EXTRACT(HOUR FROM "startTime")
+              ORDER BY hour ASC
+            ` as Promise<{ hour: number; count: number }[]>,
+
+        // Unique customers (by phone number) - grouped to get call counts
+        prisma.call.groupBy({
+          by: ['callerNumber'],
+          where,
+          _count: { callerNumber: true },
+        }),
+
+        // Placeholder for returning customers (will calculate from uniqueCustomers)
+        Promise.resolve([]),
       ]);
 
-      // Calculate appointment booking rate
-      const appointmentIntentCalls = callsByIntent.find(c => c.intent === 'appointment_booking')?._count?.intent || 0;
-      const bookingSuccessRate = appointmentIntentCalls > 0
-        ? (appointmentsCreated / appointmentIntentCalls) * 100
+      // Calculate appointment booking rate (appointments per total calls)
+      const bookingSuccessRate = totalCalls > 0
+        ? (appointmentsCreated / totalCalls) * 100
+        : 0;
+
+      // Calculate customer retention metrics
+      // Filter customers who have called more than once
+      const customersWithCallCounts = uniqueCustomers;
+      const totalUniqueCustomers = customersWithCallCounts.length;
+      const totalReturningCustomers = customersWithCallCounts.filter(
+        c => c._count.callerNumber > 1
+      ).length;
+      const retentionRate = totalUniqueCustomers > 0
+        ? (totalReturningCustomers / totalUniqueCustomers) * 100
         : 0;
 
       return {
@@ -421,6 +479,9 @@ export async function apiRoutes(fastify: FastifyInstance) {
             avgDurationSeconds: Math.round(avgDuration._avg.duration || 0),
             appointmentsCreated,
             bookingSuccessRate: Math.round(bookingSuccessRate * 10) / 10,
+            uniqueCustomers: totalUniqueCustomers,
+            returningCustomers: totalReturningCustomers,
+            retentionRate: Math.round(retentionRate * 10) / 10,
           },
           callsByStatus: callsByStatus.map(s => ({
             status: s.status,
@@ -429,6 +490,14 @@ export async function apiRoutes(fastify: FastifyInstance) {
           callsByIntent: callsByIntent.map(i => ({
             intent: i.intent,
             count: i._count.intent,
+          })),
+          appointmentsByStatus: appointmentsByStatus.map(a => ({
+            status: a.status,
+            count: a._count.status,
+          })),
+          callsByHour: callsByHour.map(h => ({
+            hour: h.hour,
+            count: h.count,
           })),
           callsPerDay,
           dateRange: {

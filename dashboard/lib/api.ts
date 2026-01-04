@@ -81,12 +81,17 @@ export interface AnalyticsSummary {
   avgDurationSeconds: number;
   appointmentsCreated: number;
   bookingSuccessRate: number;
+  uniqueCustomers: number;
+  returningCustomers: number;
+  retentionRate: number;
 }
 
 export interface Analytics {
   summary: AnalyticsSummary;
   callsByStatus: Array<{ status: string; count: number }>;
   callsByIntent: Array<{ intent: string; count: number }>;
+  appointmentsByStatus: Array<{ status: string; count: number }>;
+  callsByHour: Array<{ hour: number; count: number }>;
   callsPerDay: Array<{ date: string; count: number }>;
   dateRange: {
     from: string;
