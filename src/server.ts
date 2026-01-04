@@ -8,6 +8,7 @@ import { apiRoutes } from './routes/api.js';
 import { audioRoutes } from './routes/audio.js';
 import { integrationRoutes } from './routes/integrations.js';
 import fastifyFormbody from '@fastify/formbody';
+import { startScheduledJobs, stopScheduledJobs } from './jobs/scheduler.js';
 
 // Initialize Prisma Client
 export const prisma = new PrismaClient({
@@ -103,8 +104,9 @@ fastify.get('/', async (_request, _reply) => {
 // Graceful shutdown
 const closeGracefully = async (signal: string) => {
   fastify.log.info(`Received signal ${signal}, closing gracefully...`);
-  
+
   try {
+    stopScheduledJobs();
     await prisma.$disconnect();
     await fastify.close();
     fastify.log.info('Server closed successfully');
@@ -124,17 +126,20 @@ const start = async () => {
     // Test database connection
     await prisma.$connect();
     fastify.log.info('Database connected successfully');
-    
+
     // Start listening
     await fastify.listen({
       port: env.PORT,
       host: '0.0.0.0', // Listen on all interfaces
     });
-    
+
     fastify.log.info(`Server running on http://localhost:${env.PORT}`);
     fastify.log.info(`Health check: http://localhost:${env.PORT}/health`);
     fastify.log.info(`Environment: ${env.NODE_ENV}`);
-    
+
+    // Start scheduled jobs
+    startScheduledJobs();
+
   } catch (err) {
     fastify.log.error({ err }, 'Failed to start server');
     process.exit(1);

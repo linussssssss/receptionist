@@ -236,33 +236,65 @@ export async function integrationRoutes(fastify: FastifyInstance) {
       }
 
       if (resourceState === 'exists') {
-        // Calendar was updated, fetch changes
-        // For now, we'll do a simple approach: fetch recent events and sync them
-        // In production, you'd want to use sync tokens for more efficient syncing
-
-        const now = new Date();
-        const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-
+        // Calendar was updated, fetch only changed events using sync token
         try {
-          const events = await googleCalendarService.listEvents(
-            webhook.clientId,
-            yesterday,
-            new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000) // Next 30 days
+          const client = await prisma.client.findUnique({
+            where: { id: webhook.clientId },
+          });
+
+          if (!client) {
+            fastify.log.warn({ clientId: webhook.clientId }, 'Client not found for webhook');
+            return { success: true };
+          }
+
+          const integrations = client.integrations as any;
+          const syncToken = integrations?.googleCalendar?.syncToken;
+
+          // Fetch only changed events using delta sync
+          let allEvents: any[] = [];
+          let nextPageToken: string | undefined;
+          let nextSyncToken: string | undefined;
+
+          do {
+            const result = await googleCalendarService.listEventsDelta(
+              webhook.clientId,
+              nextPageToken || syncToken
+            );
+
+            allEvents = allEvents.concat(result.events);
+            nextPageToken = result.nextPageToken;
+            nextSyncToken = result.nextSyncToken || nextSyncToken;
+
+            // If there's a next page token, continue fetching
+          } while (nextPageToken);
+
+          fastify.log.info(
+            { clientId: webhook.clientId, eventCount: allEvents.length, hadSyncToken: !!syncToken },
+            'Fetched calendar changes via delta sync'
           );
 
-          // Sync each event (this is simplified - in production you'd be more selective)
-          for (const event of events) {
+          // Sync each changed event
+          for (const event of allEvents) {
             if (event.id) {
               try {
+                // Determine operation based on event status
+                const operation = event.status === 'cancelled' ? 'DELETE' : 'UPDATE';
+
                 await calendarSyncService.syncCalendarEventToAppointment(
                   webhook.clientId,
                   event.id,
-                  'UPDATE'
+                  operation
                 );
               } catch (err) {
                 fastify.log.error({ err, eventId: event.id }, 'Failed to sync calendar event');
               }
             }
+          }
+
+          // Update sync token for next delta sync
+          if (nextSyncToken) {
+            await googleCalendarService.updateSyncToken(webhook.clientId, nextSyncToken);
+            fastify.log.info({ clientId: webhook.clientId }, 'Updated sync token for future delta syncs');
           }
         } catch (err) {
           fastify.log.error({ err, clientId: webhook.clientId }, 'Failed to process calendar webhook');

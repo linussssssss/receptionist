@@ -16,6 +16,7 @@ export interface GoogleCalendarConfig {
   enabled: boolean;
   connectedAt: string; // ISO timestamp
   lastSyncAt?: string; // ISO timestamp
+  syncToken?: string; // Token for incremental sync (delta changes)
 }
 
 export interface CalendarEvent {

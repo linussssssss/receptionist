@@ -225,8 +225,8 @@ export class CalendarSyncService {
           break;
       }
 
-      // Update last sync time
-      await this.updateLastSyncTime(clientId);
+      // Note: Last sync time is updated by the webhook handler after processing all events
+      // This avoids multiple Client table updates per webhook notification
     } catch (err: any) {
       console.error(`Failed to sync calendar event ${eventId} to appointment:`, err);
       throw err;

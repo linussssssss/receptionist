@@ -98,6 +98,81 @@ export class GoogleCalendarService {
   }
 
   /**
+   * List changed events using delta/sync tokens for efficient incremental sync
+   * Returns both the events and the new sync token to use for the next delta request
+   */
+  async listEventsDelta(
+    clientId: string,
+    syncToken?: string
+  ): Promise<{ events: GoogleCalendarEvent[]; nextSyncToken?: string; nextPageToken?: string }> {
+    const auth = await oauthService.getOAuth2Client(clientId);
+    const calendar = google.calendar({ version: 'v3', auth });
+
+    const client = await prisma.client.findUnique({ where: { id: clientId } });
+    const calendarId = ((client?.integrations as any)?.googleCalendar?.calendarId) || 'primary';
+
+    try {
+      const response = await calendar.events.list({
+        calendarId,
+        syncToken: syncToken || undefined,
+        singleEvents: true,
+        showDeleted: true, // Include deleted events in delta sync
+        maxResults: 250, // Fetch up to 250 events per page
+      });
+
+      return {
+        events: response.data.items || [],
+        nextSyncToken: response.data.nextSyncToken,
+        nextPageToken: response.data.nextPageToken,
+      };
+    } catch (err: any) {
+      // If sync token is invalid, Google returns 410 Gone
+      if (err.code === 410 || err.status === 410) {
+        // Sync token expired or invalid - do a full sync
+        console.warn('Sync token expired, performing full sync');
+        const now = new Date();
+        const past = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000); // 30 days ago
+        const future = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000); // 90 days ahead
+
+        const response = await calendar.events.list({
+          calendarId,
+          timeMin: past.toISOString(),
+          timeMax: future.toISOString(),
+          singleEvents: true,
+          showDeleted: true,
+          maxResults: 250,
+        });
+
+        return {
+          events: response.data.items || [],
+          nextSyncToken: response.data.nextSyncToken,
+          nextPageToken: response.data.nextPageToken,
+        };
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Update sync token for a client
+   */
+  async updateSyncToken(clientId: string, syncToken: string): Promise<void> {
+    const client = await prisma.client.findUnique({ where: { id: clientId } });
+    if (!client) return;
+
+    const integrations = client.integrations as any;
+    if (!integrations?.googleCalendar) return;
+
+    integrations.googleCalendar.syncToken = syncToken;
+    integrations.googleCalendar.lastSyncAt = new Date().toISOString();
+
+    await prisma.client.update({
+      where: { id: clientId },
+      data: { integrations },
+    });
+  }
+
+  /**
    * Watch calendar for push notifications
    */
   async watchCalendar(clientId: string, webhookUrl: string): Promise<WatchResponse> {
