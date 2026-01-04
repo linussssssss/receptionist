@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Check, AlertCircle, Loader2 } from 'lucide-react';
 
-export default function OAuthCallbackPage() {
+function OAuthCallbackContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
@@ -98,5 +98,24 @@ export default function OAuthCallbackPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function OAuthCallbackPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen bg-gray-50 dark:bg-gray-900 p-4">
+        <Card className="w-full max-w-md">
+          <CardContent className="p-8">
+            <div className="text-center">
+              <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
+              <h2 className="text-xl font-semibold mb-2 dark:text-white">Loading...</h2>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    }>
+      <OAuthCallbackContent />
+    </Suspense>
   );
 }

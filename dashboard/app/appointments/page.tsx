@@ -172,14 +172,14 @@ export default function AppointmentsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Date & Time</TableHead>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Reminder</TableHead>
-                  <TableHead>Client</TableHead>
-                  <TableHead>Duration</TableHead>
-                  <TableHead>Call</TableHead>
+                  <TableHead className="w-[140px]">Date & Time</TableHead>
+                  <TableHead className="w-[140px]">Customer</TableHead>
+                  <TableHead className="w-[110px]">Email</TableHead>
+                  <TableHead className="w-[90px]">Status</TableHead>
+                  <TableHead className="w-[90px]">Reminder</TableHead>
+                  <TableHead className="w-[100px]">Client</TableHead>
+                  <TableHead className="w-[70px]">Duration</TableHead>
+                  <TableHead className="w-[90px]">Call</TableHead>
                   <TableHead className="w-[50px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -215,18 +215,18 @@ export default function AppointmentsPage() {
                       </TableCell>
                       <TableCell>
                         {appointment.customerEmail ? (
-                          <div className="flex items-center gap-1 text-sm text-gray-700">
-                            <Mail className="h-3 w-3 text-gray-400" />
-                            <span className="max-w-[150px] truncate" title={appointment.customerEmail}>
+                          <div className="flex items-center gap-1 text-xs text-gray-700">
+                            <Mail className="h-3 w-3 text-gray-400 flex-shrink-0" />
+                            <span className="max-w-[80px] truncate" title={appointment.customerEmail}>
                               {appointment.customerEmail}
                             </span>
                           </div>
                         ) : (
-                          <span className="text-sm text-gray-400">-</span>
+                          <span className="text-xs text-gray-400">-</span>
                         )}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={STATUS_COLORS[appointment.status] || 'outline'}>
+                        <Badge variant={STATUS_COLORS[appointment.status] || 'outline'} className="text-xs">
                           {appointment.status}
                         </Badge>
                       </TableCell>
@@ -234,43 +234,44 @@ export default function AppointmentsPage() {
                         {appointment.customerEmail ? (
                           appointment.reminderSent ? (
                             <div className="flex items-center gap-1">
-                              <Badge variant="secondary" className="flex items-center gap-1">
+                              <Badge variant="secondary" className="flex items-center gap-1 text-xs px-2 py-0">
                                 <Bell className="h-3 w-3" />
-                                Sent
+                                <span className="hidden sm:inline">Sent</span>
                               </Badge>
                               {appointment.reminderSentAt && (
-                                <span className="text-xs text-gray-400" title={new Date(appointment.reminderSentAt).toLocaleString('de-DE')}>
+                                <span className="text-xs text-gray-400 hidden lg:inline" title={new Date(appointment.reminderSentAt).toLocaleString('de-DE')}>
                                   <Clock className="h-3 w-3 inline" />
                                 </span>
                               )}
                             </div>
                           ) : (
-                            <Badge variant="outline" className="flex items-center gap-1">
+                            <Badge variant="outline" className="flex items-center gap-1 text-xs px-2 py-0">
                               <BellOff className="h-3 w-3" />
-                              Pending
+                              <span className="hidden sm:inline">Pending</span>
                             </Badge>
                           )
                         ) : (
-                          <span className="text-sm text-gray-400">N/A</span>
+                          <span className="text-xs text-gray-400">-</span>
                         )}
                       </TableCell>
                       <TableCell>
-                        <span className="text-sm">{appointment.client.name}</span>
+                        <span className="text-xs truncate block max-w-[100px]" title={appointment.client.name}>{appointment.client.name}</span>
                       </TableCell>
                       <TableCell>
-                        <span className="text-sm">{appointment.durationMinutes || 30} min</span>
+                        <span className="text-xs">{appointment.durationMinutes || 30}m</span>
                       </TableCell>
                       <TableCell>
                         {appointment.call ? (
                           <Button
                             variant="ghost"
                             size="sm"
+                            className="h-7 px-2 text-xs"
                             onClick={() => router.push(`/calls/${appointment.call!.id}`)}
                           >
-                            View Call
+                            View
                           </Button>
                         ) : (
-                          <span className="text-sm text-gray-400">-</span>
+                          <span className="text-xs text-gray-400">-</span>
                         )}
                       </TableCell>
                       <TableCell>

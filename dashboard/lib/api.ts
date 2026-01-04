@@ -111,7 +111,7 @@ export interface ClientSettings {
 }
 
 async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const headers: HeadersInit = { ...options?.headers };
+  const headers: Record<string, string> = { ...(options?.headers as Record<string, string>) };
 
   // Only set Content-Type if there's a body
   if (options?.body) {

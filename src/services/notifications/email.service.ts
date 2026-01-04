@@ -1,4 +1,5 @@
 import { Resend } from 'resend';
+import ical from 'ical-generator';
 import { env } from '../../config/env.js';
 import { createServiceLogger } from '../../utils/logger.js';
 import { generateAppointmentReminderEmail } from './templates/appointment-reminder.js';
@@ -67,12 +68,22 @@ export class EmailService {
         clientPhone: appointment.client.phoneNumber || undefined,
       });
 
-      // Send email via Resend
+      // Generate calendar invite (.ics file)
+      const icsContent = this.generateCalendarInvite(appointment);
+
+      // Send email via Resend with .ics attachment
       const result = await this.sendEmail(
         appointment.customerEmail,
         subject,
         html,
-        text
+        text,
+        undefined,
+        [
+          {
+            filename: 'appointment.ics',
+            content: icsContent,
+          },
+        ]
       );
 
       if (result.success) {
@@ -82,7 +93,7 @@ export class EmailService {
             customerEmail: appointment.customerEmail,
             messageId: result.messageId,
           },
-          'Appointment reminder email sent successfully'
+          'Appointment reminder email sent successfully with calendar invite'
         );
       }
 
@@ -142,12 +153,22 @@ export class EmailService {
         clientPhone: appointment.client.phoneNumber || undefined,
       });
 
-      // Send email via Resend
+      // Generate calendar invite (.ics file)
+      const icsContent = this.generateCalendarInvite(appointment);
+
+      // Send email via Resend with .ics attachment
       const result = await this.sendEmail(
         appointment.customerEmail,
         subject,
         html,
-        text
+        text,
+        undefined,
+        [
+          {
+            filename: 'appointment.ics',
+            content: icsContent,
+          },
+        ]
       );
 
       if (result.success) {
@@ -157,7 +178,7 @@ export class EmailService {
             customerEmail: appointment.customerEmail,
             messageId: result.messageId,
           },
-          'Appointment confirmation email sent successfully'
+          'Appointment confirmation email sent successfully with calendar invite'
         );
       }
 
@@ -179,6 +200,43 @@ export class EmailService {
   }
 
   /**
+   * Generate .ics calendar invite for appointment
+   */
+  private generateCalendarInvite(
+    appointment: Appointment & { client: Pick<Client, 'id' | 'name' | 'phoneNumber'> }
+  ): string {
+    const calendar = ical({ name: 'Terminbestätigung' });
+
+    const endTime = new Date(
+      new Date(appointment.datetime).getTime() +
+        (appointment.durationMinutes || 30) * 60 * 1000
+    );
+
+    calendar.createEvent({
+      start: appointment.datetime,
+      end: endTime,
+      summary: `Termin bei ${appointment.client.name}`,
+      description: appointment.reason || 'Termin',
+      location: appointment.client.name,
+      organizer: {
+        name: appointment.client.name,
+        email: 'noreply@example.com', // Using placeholder since we may not have client email
+      },
+      attendees: appointment.customerEmail
+        ? [
+            {
+              name: appointment.customerName,
+              email: appointment.customerEmail,
+              rsvp: true,
+            },
+          ]
+        : undefined,
+    });
+
+    return calendar.toString();
+  }
+
+  /**
    * Generic email sending method
    */
   async sendEmail(
@@ -186,7 +244,8 @@ export class EmailService {
     subject: string,
     html: string,
     text?: string,
-    from?: string
+    from?: string,
+    attachments?: Array<{ filename: string; content: string }>
   ): Promise<EmailResult> {
     try {
       const fromAddress = from || this.fromEmail;
@@ -206,6 +265,7 @@ export class EmailService {
         subject,
         html,
         text: text || undefined,
+        ...(attachments && { attachments }),
       });
 
       if (response.error) {

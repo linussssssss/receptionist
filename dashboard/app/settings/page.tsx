@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { api, type ClientSettings } from '@/lib/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Save, Settings as SettingsIcon, Calendar } from 'lucide-react';
 import { CalendarIntegration } from '@/components/calendar-integration';
 
-export default function SettingsPage() {
+function SettingsContent() {
   const searchParams = useSearchParams();
   const [settings, setSettings] = useState<ClientSettings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -346,5 +346,17 @@ export default function SettingsPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex h-full items-center justify-center">
+        <div className="text-lg text-gray-500">Loading settings...</div>
+      </div>
+    }>
+      <SettingsContent />
+    </Suspense>
   );
 }
