@@ -4,6 +4,7 @@ import websocket from '@fastify/websocket';
 import { env } from './config/env.js';
 import { PrismaClient } from '@prisma/client';
 import { webhookRoutes } from './routes/webhooks.js';
+import { authRoutes } from './routes/auth.js';
 import { apiRoutes } from './routes/api.js';
 import { audioRoutes } from './routes/audio.js';
 import { integrationRoutes } from './routes/integrations.js';
@@ -53,6 +54,7 @@ await fastify.register(websocket, {
 
 // Register routes
 await fastify.register(webhookRoutes);
+await fastify.register(authRoutes);
 await fastify.register(apiRoutes);
 await fastify.register(audioRoutes);
 await fastify.register(integrationRoutes);
@@ -89,6 +91,15 @@ fastify.get('/', async (_request, _reply) => {
     endpoints: {
       health: '/health',
       webhooks: '/webhooks/*',
+      auth: {
+        login: 'POST /api/auth/login',
+        register: 'POST /api/auth/register',
+        refresh: 'POST /api/auth/refresh',
+        logout: 'POST /api/auth/logout',
+        me: 'GET /api/auth/me',
+        invite: 'POST /api/auth/invite (Admin)',
+        users: 'GET /api/auth/users (Admin)',
+      },
       api: {
         calls: 'GET /api/calls',
         callDetails: 'GET /api/calls/:id',

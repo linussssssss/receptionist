@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../server.js';
 import { calendarSyncService } from '../services/integrations/calendar-sync.service.js';
+import { authenticate, requireRole, injectClientContext } from '../hooks/auth.hook.js';
 
 // Query parameter schemas
 const paginationSchema = z.object({
@@ -52,6 +53,10 @@ const updateClientSettingsSchema = z.object({
 });
 
 export async function apiRoutes(fastify: FastifyInstance) {
+  // Apply authentication to all routes in this plugin
+  fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', injectClientContext);
+
   /**
    * GET /api/calls
    * List all calls with pagination and filters
@@ -59,14 +64,15 @@ export async function apiRoutes(fastify: FastifyInstance) {
   fastify.get('/api/calls', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const query = callsQuerySchema.parse(request.query);
-      const { page, limit, status, from, to, callerNumber, clientId } = query;
+      const { page, limit, status, from, to, callerNumber } = query;
       const skip = (page - 1) * limit;
 
-      // Build where clause
-      const where: any = {};
+      // Build where clause - Always filter by authenticated user's client
+      const where: any = {
+        clientId: request.user!.clientId,
+      };
       if (status) where.status = status;
       if (callerNumber) where.callerNumber = { contains: callerNumber };
-      if (clientId) where.clientId = clientId;
       if (from || to) {
         where.startTime = {};
         if (from) where.startTime.gte = new Date(from);
@@ -116,8 +122,11 @@ export async function apiRoutes(fastify: FastifyInstance) {
   fastify.get('/api/calls/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     const { id } = request.params;
 
-    const call = await prisma.call.findUnique({
-      where: { id },
+    const call = await prisma.call.findFirst({
+      where: {
+        id,
+        clientId: request.user!.clientId, // Verify call belongs to user's client
+      },
       include: {
         client: {
           select: { id: true, name: true, phoneNumber: true },
@@ -144,12 +153,13 @@ export async function apiRoutes(fastify: FastifyInstance) {
   fastify.get('/api/appointments', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const query = appointmentsQuerySchema.parse(request.query);
-      const { page, limit, status, from, to, clientId } = query;
+      const { page, limit, status, from, to } = query;
       const skip = (page - 1) * limit;
 
-      const where: any = {};
+      const where: any = {
+        clientId: request.user!.clientId, // Always filter by user's client
+      };
       if (status) where.status = status;
-      if (clientId) where.clientId = clientId;
       if (from || to) {
         where.datetime = {};
         if (from) where.datetime.gte = new Date(from);
@@ -199,8 +209,11 @@ export async function apiRoutes(fastify: FastifyInstance) {
   fastify.get('/api/appointments/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     const { id } = request.params;
 
-    const appointment = await prisma.appointment.findUnique({
-      where: { id },
+    const appointment = await prisma.appointment.findFirst({
+      where: {
+        id,
+        clientId: request.user!.clientId, // Verify appointment belongs to user's client
+      },
       include: {
         client: { select: { id: true, name: true } },
         call: { select: { id: true, callSid: true, callerNumber: true } },
@@ -224,9 +237,12 @@ export async function apiRoutes(fastify: FastifyInstance) {
       const { id } = request.params;
       const updates = updateAppointmentSchema.parse(request.body);
 
-      // Check if appointment exists
-      const existingAppointment = await prisma.appointment.findUnique({
-        where: { id },
+      // Check if appointment exists and belongs to user's client
+      const existingAppointment = await prisma.appointment.findFirst({
+        where: {
+          id,
+          clientId: request.user!.clientId,
+        },
         include: { client: true },
       });
 
@@ -282,9 +298,12 @@ export async function apiRoutes(fastify: FastifyInstance) {
     try {
       const { id } = request.params;
 
-      // Check if appointment exists
-      const existingAppointment = await prisma.appointment.findUnique({
-        where: { id },
+      // Check if appointment exists and belongs to user's client
+      const existingAppointment = await prisma.appointment.findFirst({
+        where: {
+          id,
+          clientId: request.user!.clientId,
+        },
         include: { client: true },
       });
 
@@ -329,19 +348,22 @@ export async function apiRoutes(fastify: FastifyInstance) {
   fastify.get('/api/analytics', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const query = analyticsQuerySchema.parse(request.query);
-      const { from, to, clientId } = query;
+      const { from, to } = query;
 
       // Default to last 30 days if no date range specified
       const endDate = to ? new Date(to) : new Date();
       const startDate = from ? new Date(from) : new Date(endDate.getTime() - 30 * 24 * 60 * 60 * 1000);
 
+      // Get clientId from authenticated user
+      const clientId = request.user!.clientId;
+
       const where: any = {
+        clientId, // Always filter by user's client
         startTime: {
           gte: startDate,
           lte: endDate,
         },
       };
-      if (clientId) where.clientId = clientId;
 
       // Get all stats in parallel
       const [
@@ -519,14 +541,11 @@ export async function apiRoutes(fastify: FastifyInstance) {
    * GET /api/client/settings
    * Get client configuration
    */
-  fastify.get('/api/client/settings', async (request: FastifyRequest<{ Querystring: { clientId?: string } }>, reply: FastifyReply) => {
-    const { clientId } = request.query;
-
-    // For now, get the first client or by ID
-    // In production, this would be based on authenticated user
-    const client = clientId
-      ? await prisma.client.findUnique({ where: { id: clientId } })
-      : await prisma.client.findFirst();
+  fastify.get('/api/client/settings', async (request: FastifyRequest, reply: FastifyReply) => {
+    // Get user's client
+    const client = await prisma.client.findUnique({
+      where: { id: request.user!.clientId },
+    });
 
     if (!client) {
       reply.code(404);
@@ -554,25 +573,16 @@ export async function apiRoutes(fastify: FastifyInstance) {
 
   /**
    * PUT /api/client/settings
-   * Update client configuration
+   * Update client configuration (Admin only)
    */
-  fastify.put('/api/client/settings', async (request: FastifyRequest<{ Querystring: { clientId?: string } }>, reply: FastifyReply) => {
+  fastify.put('/api/client/settings', {
+    preHandler: requireRole('ADMIN'),
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const { clientId } = request.query;
       const updates = updateClientSettingsSchema.parse(request.body);
 
-      // Get client to update
-      const existingClient = clientId
-        ? await prisma.client.findUnique({ where: { id: clientId } })
-        : await prisma.client.findFirst();
-
-      if (!existingClient) {
-        reply.code(404);
-        return { error: 'Client not found' };
-      }
-
       const updatedClient = await prisma.client.update({
-        where: { id: existingClient.id },
+        where: { id: request.user!.clientId },
         data: updates,
       });
 
@@ -581,8 +591,9 @@ export async function apiRoutes(fastify: FastifyInstance) {
         data: {
           eventType: 'settings_updated',
           severity: 'info',
-          message: `Client settings updated`,
-          clientId: existingClient.id,
+          message: `Client settings updated by ${request.user!.email}`,
+          clientId: request.user!.clientId,
+          userId: request.user!.userId,
           details: { updates } as any,
         },
       });

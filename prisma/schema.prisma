@@ -38,9 +38,120 @@ model Client {
   appointments      Appointment[]
   calendarSyncs     CalendarSync[]
   calendarWebhook   CalendarWebhook?
+  users             User[]
+  invitations       Invitation[]
 
   @@index([phoneNumber])
   @@index([isActive])
+}
+
+// User accounts for dashboard access
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String
+  name          String
+  role          UserRole  @default(STAFF)
+  clientId      String
+
+  // Account status
+  isActive      Boolean   @default(true)
+  emailVerified Boolean   @default(false)
+
+  // Invitation tracking
+  invitedBy     String?
+  invitedAt     DateTime?
+
+  // Timestamps
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastLoginAt   DateTime?
+
+  // Relations
+  client        Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  invitedUsers  User[]    @relation("UserInvitations")
+  inviter       User?     @relation("UserInvitations", fields: [invitedBy], references: [id], onDelete: SetNull)
+  sessions      Session[]
+  invitations   Invitation[]
+
+  @@index([email])
+  @@index([clientId])
+  @@index([isActive])
+  @@index([role])
+}
+
+enum UserRole {
+  ADMIN
+  STAFF
+}
+
+// User sessions for JWT token revocation
+model Session {
+  id                String    @id @default(cuid())
+  userId            String
+  token             String    @unique  // JWT jti (unique identifier)
+  refreshToken      String?   @unique
+
+  // Session metadata
+  ipAddress         String?
+  userAgent         String?
+
+  // Expiration
+  expiresAt         DateTime
+  refreshExpiresAt  DateTime?
+
+  // Status
+  isActive          Boolean   @default(true)
+  revokedAt         DateTime?
+
+  // Timestamps
+  createdAt         DateTime  @default(now())
+  lastUsedAt        DateTime  @default(now())
+
+  // Relations
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@index([isActive])
+}
+
+// User invitations for invite-only registration
+model Invitation {
+  id           String           @id @default(cuid())
+  email        String
+  token        String           @unique
+  role         UserRole         @default(STAFF)
+  clientId     String
+  invitedBy    String           // User ID
+
+  // Status
+  status       InvitationStatus @default(PENDING)
+
+  // Expiration (7 days default)
+  expiresAt    DateTime
+
+  // Timestamps
+  createdAt    DateTime         @default(now())
+  acceptedAt   DateTime?
+
+  // Relations
+  client       Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  inviter      User             @relation(fields: [invitedBy], references: [id], onDelete: Cascade)
+
+  @@index([email])
+  @@index([token])
+  @@index([clientId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
 }
 
 // Individual call record

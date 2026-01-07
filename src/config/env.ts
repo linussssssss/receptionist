@@ -44,6 +44,14 @@ const envSchema = z.object({
     .default('false')
     .transform((val) => val === 'true'),
 
+  // JWT & Authentication
+  JWT_SECRET: z.string().min(32),
+  JWT_ACCESS_EXPIRY: z.string().default('15m'),
+  JWT_REFRESH_EXPIRY: z.string().default('7d'),
+  BCRYPT_ROUNDS: z.string().default('10').transform((val) => parseInt(val, 10)),
+  MAX_LOGIN_ATTEMPTS: z.string().default('5').transform((val) => parseInt(val, 10)),
+  LOGIN_RATE_LIMIT: z.string().default('5').transform((val) => parseInt(val, 10)),
+
   // Monitoring
   SENTRY_DSN: z.string().optional(),
 
