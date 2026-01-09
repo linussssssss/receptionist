@@ -6,6 +6,7 @@ import { invitationService } from '../services/auth/invitation.service.js';
 import { authenticate, requireRole } from '../hooks/auth.hook.js';
 import { prisma } from '../server.js';
 import { env } from '../config/env.js';
+import { KEY_GENERATORS } from '../config/rate-limits.js';
 
 // Validation schemas
 const loginSchema = z.object({
@@ -208,8 +209,17 @@ export async function authRoutes(fastify: FastifyInstance) {
   /**
    * POST /api/auth/refresh
    * Refresh access token using refresh token
+   * Rate limited: 50 req/min per IP
    */
-  fastify.post('/api/auth/refresh', async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.post('/api/auth/refresh', {
+    config: {
+      rateLimit: {
+        max: 50,
+        timeWindow: '1 minute',
+        keyGenerator: KEY_GENERATORS.byIP,
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { refreshToken } = refreshTokenSchema.parse(request.body);
 
@@ -288,11 +298,19 @@ export async function authRoutes(fastify: FastifyInstance) {
   /**
    * POST /api/auth/invite
    * Admin only: Invite new user
+   * Rate limited: 10 req/min per user
    */
   fastify.post(
     '/api/auth/invite',
     {
       preHandler: [authenticate, requireRole('ADMIN')],
+      config: {
+        rateLimit: {
+          max: 10,
+          timeWindow: '1 minute',
+          keyGenerator: KEY_GENERATORS.byUser,
+        },
+      },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {

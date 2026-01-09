@@ -95,8 +95,9 @@ export class AppointmentHandler {
       throw new Error('Missing required fields for appointment creation');
     }
 
-    // Combine date and time into ISO timestamp
-    const scheduledTime = new Date(`${data.date}T${data.time}:00.000Z`);
+    // Combine date and time into ISO timestamp (local time, not UTC)
+    // Remove the Z suffix to treat this as local time, not UTC
+    const scheduledTime = new Date(`${data.date}T${data.time}:00.000`);
 
     const appointment = await prisma.appointment.create({
       data: {

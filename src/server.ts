@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
+import rateLimit from '@fastify/rate-limit';
 import { env } from './config/env.js';
 import { PrismaClient } from '@prisma/client';
 import { webhookRoutes } from './routes/webhooks.js';
@@ -10,6 +11,7 @@ import { audioRoutes } from './routes/audio.js';
 import { integrationRoutes } from './routes/integrations.js';
 import fastifyFormbody from '@fastify/formbody';
 import { startScheduledJobs, stopScheduledJobs } from './jobs/scheduler.js';
+import { redisService } from './config/redis.js';
 
 // Initialize Prisma Client
 export const prisma = new PrismaClient({
@@ -52,6 +54,26 @@ await fastify.register(websocket, {
   },
 });
 
+// Register rate limiting plugin globally (non-global by default, routes opt-in)
+// Redis store will be configured at runtime if available
+await fastify.register(rateLimit, {
+  global: false, // Routes must explicitly opt-in
+  redis: undefined, // Will be set at runtime if Redis is available
+  nameSpace: 'rl:', // Redis key prefix
+  continueExceeding: true, // Continue to count requests after limit
+  addHeadersOnExceeding: {
+    'x-ratelimit-limit': true,
+    'x-ratelimit-remaining': true,
+    'x-ratelimit-reset': true,
+  },
+  addHeaders: {
+    'x-ratelimit-limit': true,
+    'x-ratelimit-remaining': true,
+    'x-ratelimit-reset': true,
+    'retry-after': true,
+  },
+});
+
 // Register routes
 await fastify.register(webhookRoutes);
 await fastify.register(authRoutes);
@@ -64,13 +86,24 @@ fastify.get('/health', async (_request, reply) => {
   try {
     // Check database connection
     await prisma.$queryRaw`SELECT 1`;
-    
+
+    // Check Redis connection (optional)
+    const redisInfo = await redisService.getInfo();
+
     return {
       status: 'healthy',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
       environment: env.NODE_ENV,
       database: 'connected',
+      redis: redisInfo.connected ? {
+        status: 'connected',
+        keyCount: redisInfo.keyCount,
+        usedMemory: redisInfo.usedMemory,
+      } : {
+        status: 'disconnected',
+        message: 'Rate limiting using in-memory store',
+      },
     };
   } catch (error) {
     reply.code(503);
@@ -118,6 +151,7 @@ const closeGracefully = async (signal: string) => {
 
   try {
     stopScheduledJobs();
+    await redisService.disconnect();
     await prisma.$disconnect();
     await fastify.close();
     fastify.log.info('Server closed successfully');
@@ -137,6 +171,26 @@ const start = async () => {
     // Test database connection
     await prisma.$connect();
     fastify.log.info('Database connected successfully');
+
+    // Initialize Redis connection (non-blocking, logs warning on failure)
+    if (env.RATE_LIMIT_ENABLED && env.RATE_LIMIT_REDIS_ENABLED) {
+      await redisService.connect();
+
+      // If Redis connected, update rate limit plugin to use it
+      if (redisService.isHealthy()) {
+        const redisClient = redisService.getClient();
+        if (redisClient) {
+          // Update the rate limit plugin with Redis store
+          // @ts-ignore - Accessing internal property to update Redis store
+          fastify.rateLimit.redis = redisClient;
+          fastify.log.info('Rate limiting configured with Redis store');
+        }
+      } else {
+        fastify.log.warn('Rate limiting will use in-memory store (not distributed)');
+      }
+    } else {
+      fastify.log.info('Rate limiting disabled or Redis disabled - using in-memory store');
+    }
 
     // Start listening
     await fastify.listen({

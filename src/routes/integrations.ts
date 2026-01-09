@@ -5,6 +5,7 @@ import { googleCalendarService } from '../services/integrations/google-calendar.
 import { calendarSyncService } from '../services/integrations/calendar-sync.service.js';
 import { prisma } from '../server.js';
 import { env } from '../config/env.js';
+import { RATE_LIMIT_PRESETS, KEY_GENERATORS } from '../config/rate-limits.js';
 
 export async function integrationRoutes(fastify: FastifyInstance) {
   /**
@@ -150,8 +151,17 @@ export async function integrationRoutes(fastify: FastifyInstance) {
   /**
    * POST /api/integrations/google-calendar/sync/manual
    * Manually trigger sync
+   * Rate limited: 5 req/min per IP (prevents excessive syncing)
    */
-  fastify.post('/api/integrations/google-calendar/sync/manual', async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.post('/api/integrations/google-calendar/sync/manual', {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '1 minute',
+        keyGenerator: (request: any) => `calendar-sync:${request.ip}`,
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const body = z.object({
         clientId: z.string(),
@@ -207,8 +217,16 @@ export async function integrationRoutes(fastify: FastifyInstance) {
   /**
    * POST /webhooks/google-calendar/notifications
    * Receive Google Calendar push notifications
+   * Soft rate limit: 100 req/min per channel (high threshold to catch extreme abuse only)
    */
-  fastify.post('/webhooks/google-calendar/notifications', async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.post('/webhooks/google-calendar/notifications', {
+    config: {
+      rateLimit: {
+        ...RATE_LIMIT_PRESETS.WEBHOOK_SOFT,
+        keyGenerator: KEY_GENERATORS.byChannelId,
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const channelId = request.headers['x-goog-channel-id'] as string;
       const resourceState = request.headers['x-goog-resource-state'] as string;

@@ -52,6 +52,14 @@ const envSchema = z.object({
   MAX_LOGIN_ATTEMPTS: z.string().default('5').transform((val) => parseInt(val, 10)),
   LOGIN_RATE_LIMIT: z.string().default('5').transform((val) => parseInt(val, 10)),
 
+  // Rate Limiting
+  RATE_LIMIT_ENABLED: z.string().default('true').transform((val) => val === 'true'),
+  RATE_LIMIT_REDIS_ENABLED: z.string().default('true').transform((val) => val === 'true'),
+  RATE_LIMIT_AI_MAX: z.string().default('10').transform((val) => parseInt(val, 10)),
+  RATE_LIMIT_TTS_MAX: z.string().default('20').transform((val) => parseInt(val, 10)),
+  RATE_LIMIT_ANALYTICS_MAX: z.string().default('10').transform((val) => parseInt(val, 10)),
+  RATE_LIMIT_WEBHOOK_MAX: z.string().default('100').transform((val) => parseInt(val, 10)),
+
   // Monitoring
   SENTRY_DSN: z.string().optional(),
 

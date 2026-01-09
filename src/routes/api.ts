@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../server.js';
 import { calendarSyncService } from '../services/integrations/calendar-sync.service.js';
 import { authenticate, requireRole, injectClientContext } from '../hooks/auth.hook.js';
+import { RATE_LIMIT_PRESETS, KEY_GENERATORS } from '../config/rate-limits.js';
 
 // Query parameter schemas
 const paginationSchema = z.object({
@@ -60,8 +61,16 @@ export async function apiRoutes(fastify: FastifyInstance) {
   /**
    * GET /api/calls
    * List all calls with pagination and filters
+   * Rate limited: 60 req/min per user
    */
-  fastify.get('/api/calls', async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/api/calls', {
+    config: {
+      rateLimit: {
+        ...RATE_LIMIT_PRESETS.API_STANDARD,
+        keyGenerator: KEY_GENERATORS.byUser,
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const query = callsQuerySchema.parse(request.query);
       const { page, limit, status, from, to, callerNumber } = query;
@@ -118,8 +127,16 @@ export async function apiRoutes(fastify: FastifyInstance) {
   /**
    * GET /api/calls/:id
    * Get call details with full transcript
+   * Rate limited: 60 req/min per user
    */
-  fastify.get('/api/calls/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+  fastify.get('/api/calls/:id', {
+    config: {
+      rateLimit: {
+        ...RATE_LIMIT_PRESETS.API_STANDARD,
+        keyGenerator: KEY_GENERATORS.byUser,
+      },
+    },
+  }, async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     const { id } = request.params;
 
     const call = await prisma.call.findFirst({
@@ -149,8 +166,16 @@ export async function apiRoutes(fastify: FastifyInstance) {
   /**
    * GET /api/appointments
    * List appointments with pagination and filters
+   * Rate limited: 60 req/min per user
    */
-  fastify.get('/api/appointments', async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/api/appointments', {
+    config: {
+      rateLimit: {
+        ...RATE_LIMIT_PRESETS.API_STANDARD,
+        keyGenerator: KEY_GENERATORS.byUser,
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const query = appointmentsQuerySchema.parse(request.query);
       const { page, limit, status, from, to } = query;
@@ -205,8 +230,16 @@ export async function apiRoutes(fastify: FastifyInstance) {
   /**
    * GET /api/appointments/:id
    * Get a single appointment by ID
+   * Rate limited: 60 req/min per user
    */
-  fastify.get('/api/appointments/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+  fastify.get('/api/appointments/:id', {
+    config: {
+      rateLimit: {
+        ...RATE_LIMIT_PRESETS.API_STANDARD,
+        keyGenerator: KEY_GENERATORS.byUser,
+      },
+    },
+  }, async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     const { id } = request.params;
 
     const appointment = await prisma.appointment.findFirst({
@@ -231,8 +264,17 @@ export async function apiRoutes(fastify: FastifyInstance) {
   /**
    * PATCH /api/appointments/:id
    * Update an appointment
+   * Rate limited: 30 req/min per user (write operation)
    */
-  fastify.patch('/api/appointments/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+  fastify.patch('/api/appointments/:id', {
+    config: {
+      rateLimit: {
+        max: 30,
+        timeWindow: '1 minute',
+        keyGenerator: KEY_GENERATORS.byUser,
+      },
+    },
+  }, async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     try {
       const { id } = request.params;
       const updates = updateAppointmentSchema.parse(request.body);
@@ -293,8 +335,17 @@ export async function apiRoutes(fastify: FastifyInstance) {
   /**
    * DELETE /api/appointments/:id
    * Cancel an appointment
+   * Rate limited: 30 req/min per user (write operation)
    */
-  fastify.delete('/api/appointments/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+  fastify.delete('/api/appointments/:id', {
+    config: {
+      rateLimit: {
+        max: 30,
+        timeWindow: '1 minute',
+        keyGenerator: KEY_GENERATORS.byUser,
+      },
+    },
+  }, async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     try {
       const { id } = request.params;
 
@@ -344,8 +395,17 @@ export async function apiRoutes(fastify: FastifyInstance) {
   /**
    * GET /api/analytics
    * Get call analytics and statistics
+   * Rate limited: 10 req/min (staff), 20 req/min (admin) - protects database from expensive queries
    */
-  fastify.get('/api/analytics', async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/api/analytics', {
+    config: {
+      rateLimit: {
+        ...RATE_LIMIT_PRESETS.ANALYTICS,
+        max: (request: any) => request.user?.role === 'ADMIN' ? 20 : 10,
+        keyGenerator: KEY_GENERATORS.byUser,
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const query = analyticsQuerySchema.parse(request.query);
       const { from, to } = query;
@@ -540,8 +600,16 @@ export async function apiRoutes(fastify: FastifyInstance) {
   /**
    * GET /api/client/settings
    * Get client configuration
+   * Rate limited: 60 req/min per user
    */
-  fastify.get('/api/client/settings', async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/api/client/settings', {
+    config: {
+      rateLimit: {
+        ...RATE_LIMIT_PRESETS.API_STANDARD,
+        keyGenerator: KEY_GENERATORS.byUser,
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     // Get user's client
     const client = await prisma.client.findUnique({
       where: { id: request.user!.clientId },
@@ -574,9 +642,17 @@ export async function apiRoutes(fastify: FastifyInstance) {
   /**
    * PUT /api/client/settings
    * Update client configuration (Admin only)
+   * Rate limited: 30 req/min per user (write operation)
    */
   fastify.put('/api/client/settings', {
     preHandler: requireRole('ADMIN'),
+    config: {
+      rateLimit: {
+        max: 30,
+        timeWindow: '1 minute',
+        keyGenerator: KEY_GENERATORS.byUser,
+      },
+    },
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const updates = updateClientSettingsSchema.parse(request.body);
