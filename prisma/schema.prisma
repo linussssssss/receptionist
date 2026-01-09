@@ -36,9 +36,122 @@ model Client {
   // Relations
   calls             Call[]
   appointments      Appointment[]
-  
+  calendarSyncs     CalendarSync[]
+  calendarWebhook   CalendarWebhook?
+  users             User[]
+  invitations       Invitation[]
+
   @@index([phoneNumber])
   @@index([isActive])
+}
+
+// User accounts for dashboard access
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String
+  name          String
+  role          UserRole  @default(STAFF)
+  clientId      String
+
+  // Account status
+  isActive      Boolean   @default(true)
+  emailVerified Boolean   @default(false)
+
+  // Invitation tracking
+  invitedBy     String?
+  invitedAt     DateTime?
+
+  // Timestamps
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastLoginAt   DateTime?
+
+  // Relations
+  client        Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  invitedUsers  User[]    @relation("UserInvitations")
+  inviter       User?     @relation("UserInvitations", fields: [invitedBy], references: [id], onDelete: SetNull)
+  sessions      Session[]
+  invitations   Invitation[]
+
+  @@index([email])
+  @@index([clientId])
+  @@index([isActive])
+  @@index([role])
+}
+
+enum UserRole {
+  ADMIN
+  STAFF
+}
+
+// User sessions for JWT token revocation
+model Session {
+  id                String    @id @default(cuid())
+  userId            String
+  token             String    @unique  // JWT jti (unique identifier)
+  refreshToken      String?   @unique
+
+  // Session metadata
+  ipAddress         String?
+  userAgent         String?
+
+  // Expiration
+  expiresAt         DateTime
+  refreshExpiresAt  DateTime?
+
+  // Status
+  isActive          Boolean   @default(true)
+  revokedAt         DateTime?
+
+  // Timestamps
+  createdAt         DateTime  @default(now())
+  lastUsedAt        DateTime  @default(now())
+
+  // Relations
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@index([isActive])
+}
+
+// User invitations for invite-only registration
+model Invitation {
+  id           String           @id @default(cuid())
+  email        String
+  token        String           @unique
+  role         UserRole         @default(STAFF)
+  clientId     String
+  invitedBy    String           // User ID
+
+  // Status
+  status       InvitationStatus @default(PENDING)
+
+  // Expiration (7 days default)
+  expiresAt    DateTime
+
+  // Timestamps
+  createdAt    DateTime         @default(now())
+  acceptedAt   DateTime?
+
+  // Relations
+  client       Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  inviter      User             @relation(fields: [invitedBy], references: [id], onDelete: Cascade)
+
+  @@index([email])
+  @@index([token])
+  @@index([clientId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
 }
 
 // Individual call record
@@ -174,7 +287,8 @@ model Appointment {
   // Relations
   call            Call?             @relation(fields: [callId], references: [id], onDelete: SetNull)
   client          Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  
+  calendarSyncs   CalendarSync[]
+
   @@index([clientId])
   @@index([callId])
   @@index([datetime])
@@ -194,22 +308,98 @@ enum AppointmentStatus {
 // System events and audit log
 model SystemEvent {
   id          String   @id @default(cuid())
-  
+
   eventType   String   // call_started, call_ended, error, config_changed
   severity    String   // info, warning, error, critical
-  
+
   message     String   @db.Text
   details     Json?
-  
+
   // Context
   clientId    String?
   callId      String?
   userId      String?
-  
+
   timestamp   DateTime @default(now())
-  
+
   @@index([eventType])
   @@index([severity])
   @@index([timestamp])
   @@index([clientId])
+}
+
+// Calendar sync operations log
+model CalendarSync {
+  id              String                 @id @default(cuid())
+  appointmentId   String
+  clientId        String
+
+  // Sync details
+  operation       CalendarSyncOperation
+  direction       CalendarSyncDirection
+  status          CalendarSyncStatus     @default(PENDING)
+
+  // Event data
+  calendarEventId String?
+  eventData       Json?                  // Snapshot of calendar event data
+
+  // Error handling
+  errorMessage    String?                @db.Text
+  retryCount      Int                    @default(0)
+
+  // Timestamps
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  syncedAt        DateTime?
+
+  // Relations
+  appointment     Appointment            @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  client          Client                 @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([appointmentId])
+  @@index([clientId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum CalendarSyncOperation {
+  CREATE
+  UPDATE
+  DELETE
+}
+
+enum CalendarSyncDirection {
+  OUTBOUND  // AI Receptionist -> Calendar
+  INBOUND   // Calendar -> AI Receptionist
+}
+
+enum CalendarSyncStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
+// Google Calendar webhook channel subscriptions
+model CalendarWebhook {
+  id              String   @id @default(cuid())
+  clientId        String   @unique
+
+  // Google Channel details
+  channelId       String   @unique  // Google's channel ID
+  resourceId      String            // Google's resource ID
+  expiration      DateTime          // When channel expires
+
+  // Status
+  isActive        Boolean  @default(true)
+
+  // Timestamps
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  client          Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([channelId])
+  @@index([expiration])
 }

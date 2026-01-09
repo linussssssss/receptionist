@@ -1,6 +1,9 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../server.js';
+import { calendarSyncService } from '../services/integrations/calendar-sync.service.js';
+import { authenticate, requireRole, injectClientContext } from '../hooks/auth.hook.js';
+import { RATE_LIMIT_PRESETS, KEY_GENERATORS } from '../config/rate-limits.js';
 
 // Query parameter schemas
 const paginationSchema = z.object({
@@ -29,6 +32,17 @@ const analyticsQuerySchema = z.object({
   clientId: z.string().optional(),
 });
 
+const updateAppointmentSchema = z.object({
+  customerName: z.string().optional(),
+  customerPhone: z.string().optional(),
+  customerEmail: z.string().email().optional().nullable(),
+  datetime: z.string().datetime().optional(),
+  durationMinutes: z.number().int().positive().optional(),
+  reason: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+  status: z.enum(['PENDING', 'CONFIRMED', 'CANCELLED', 'COMPLETED', 'NO_SHOW', 'RESCHEDULED']).optional(),
+});
+
 const updateClientSettingsSchema = z.object({
   name: z.string().min(1).optional(),
   greetingMessage: z.string().min(1).optional(),
@@ -40,21 +54,34 @@ const updateClientSettingsSchema = z.object({
 });
 
 export async function apiRoutes(fastify: FastifyInstance) {
+  // Apply authentication to all routes in this plugin
+  fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', injectClientContext);
+
   /**
    * GET /api/calls
    * List all calls with pagination and filters
+   * Rate limited: 60 req/min per user
    */
-  fastify.get('/api/calls', async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/api/calls', {
+    config: {
+      rateLimit: {
+        ...RATE_LIMIT_PRESETS.API_STANDARD,
+        keyGenerator: KEY_GENERATORS.byUser,
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const query = callsQuerySchema.parse(request.query);
-      const { page, limit, status, from, to, callerNumber, clientId } = query;
+      const { page, limit, status, from, to, callerNumber } = query;
       const skip = (page - 1) * limit;
 
-      // Build where clause
-      const where: any = {};
+      // Build where clause - Always filter by authenticated user's client
+      const where: any = {
+        clientId: request.user!.clientId,
+      };
       if (status) where.status = status;
       if (callerNumber) where.callerNumber = { contains: callerNumber };
-      if (clientId) where.clientId = clientId;
       if (from || to) {
         where.startTime = {};
         if (from) where.startTime.gte = new Date(from);
@@ -100,12 +127,23 @@ export async function apiRoutes(fastify: FastifyInstance) {
   /**
    * GET /api/calls/:id
    * Get call details with full transcript
+   * Rate limited: 60 req/min per user
    */
-  fastify.get('/api/calls/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+  fastify.get('/api/calls/:id', {
+    config: {
+      rateLimit: {
+        ...RATE_LIMIT_PRESETS.API_STANDARD,
+        keyGenerator: KEY_GENERATORS.byUser,
+      },
+    },
+  }, async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     const { id } = request.params;
 
-    const call = await prisma.call.findUnique({
-      where: { id },
+    const call = await prisma.call.findFirst({
+      where: {
+        id,
+        clientId: request.user!.clientId, // Verify call belongs to user's client
+      },
       include: {
         client: {
           select: { id: true, name: true, phoneNumber: true },
@@ -128,16 +166,25 @@ export async function apiRoutes(fastify: FastifyInstance) {
   /**
    * GET /api/appointments
    * List appointments with pagination and filters
+   * Rate limited: 60 req/min per user
    */
-  fastify.get('/api/appointments', async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/api/appointments', {
+    config: {
+      rateLimit: {
+        ...RATE_LIMIT_PRESETS.API_STANDARD,
+        keyGenerator: KEY_GENERATORS.byUser,
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const query = appointmentsQuerySchema.parse(request.query);
-      const { page, limit, status, from, to, clientId } = query;
+      const { page, limit, status, from, to } = query;
       const skip = (page - 1) * limit;
 
-      const where: any = {};
+      const where: any = {
+        clientId: request.user!.clientId, // Always filter by user's client
+      };
       if (status) where.status = status;
-      if (clientId) where.clientId = clientId;
       if (from || to) {
         where.datetime = {};
         if (from) where.datetime.gte = new Date(from);
@@ -181,25 +228,202 @@ export async function apiRoutes(fastify: FastifyInstance) {
   });
 
   /**
+   * GET /api/appointments/:id
+   * Get a single appointment by ID
+   * Rate limited: 60 req/min per user
+   */
+  fastify.get('/api/appointments/:id', {
+    config: {
+      rateLimit: {
+        ...RATE_LIMIT_PRESETS.API_STANDARD,
+        keyGenerator: KEY_GENERATORS.byUser,
+      },
+    },
+  }, async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    const { id } = request.params;
+
+    const appointment = await prisma.appointment.findFirst({
+      where: {
+        id,
+        clientId: request.user!.clientId, // Verify appointment belongs to user's client
+      },
+      include: {
+        client: { select: { id: true, name: true } },
+        call: { select: { id: true, callSid: true, callerNumber: true } },
+      },
+    });
+
+    if (!appointment) {
+      reply.code(404);
+      return { error: 'Appointment not found' };
+    }
+
+    return { data: appointment };
+  });
+
+  /**
+   * PATCH /api/appointments/:id
+   * Update an appointment
+   * Rate limited: 30 req/min per user (write operation)
+   */
+  fastify.patch('/api/appointments/:id', {
+    config: {
+      rateLimit: {
+        max: 30,
+        timeWindow: '1 minute',
+        keyGenerator: KEY_GENERATORS.byUser,
+      },
+    },
+  }, async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    try {
+      const { id } = request.params;
+      const updates = updateAppointmentSchema.parse(request.body);
+
+      // Check if appointment exists and belongs to user's client
+      const existingAppointment = await prisma.appointment.findFirst({
+        where: {
+          id,
+          clientId: request.user!.clientId,
+        },
+        include: { client: true },
+      });
+
+      if (!existingAppointment) {
+        reply.code(404);
+        return { error: 'Appointment not found' };
+      }
+
+      // Prepare update data
+      const updateData: any = { ...updates };
+      if (updates.datetime) {
+        updateData.datetime = new Date(updates.datetime);
+      }
+
+      // Update appointment
+      const updatedAppointment = await prisma.appointment.update({
+        where: { id },
+        data: updateData,
+        include: {
+          client: { select: { id: true, name: true } },
+          call: { select: { id: true, callSid: true, callerNumber: true } },
+        },
+      });
+
+      // Sync to Google Calendar if enabled
+      if (existingAppointment.client.integrations) {
+        const googleCalendarConfig = (existingAppointment.client.integrations as any)?.googleCalendar;
+        if (googleCalendarConfig?.enabled && updatedAppointment.calendarId) {
+          // Sync in background - don't block appointment update
+          calendarSyncService.syncAppointmentToCalendar(updatedAppointment.id, 'UPDATE')
+            .catch(err => {
+              request.log.error({ err, appointmentId: updatedAppointment.id },
+                'Failed to sync appointment update to Google Calendar');
+            });
+        }
+      }
+
+      return { data: updatedAppointment };
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        reply.code(400);
+        return { error: 'Invalid request data', details: err.issues };
+      }
+      throw err;
+    }
+  });
+
+  /**
+   * DELETE /api/appointments/:id
+   * Cancel an appointment
+   * Rate limited: 30 req/min per user (write operation)
+   */
+  fastify.delete('/api/appointments/:id', {
+    config: {
+      rateLimit: {
+        max: 30,
+        timeWindow: '1 minute',
+        keyGenerator: KEY_GENERATORS.byUser,
+      },
+    },
+  }, async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    try {
+      const { id } = request.params;
+
+      // Check if appointment exists and belongs to user's client
+      const existingAppointment = await prisma.appointment.findFirst({
+        where: {
+          id,
+          clientId: request.user!.clientId,
+        },
+        include: { client: true },
+      });
+
+      if (!existingAppointment) {
+        reply.code(404);
+        return { error: 'Appointment not found' };
+      }
+
+      // Sync deletion to Google Calendar if enabled
+      if (existingAppointment.client.integrations) {
+        const googleCalendarConfig = (existingAppointment.client.integrations as any)?.googleCalendar;
+        if (googleCalendarConfig?.enabled && existingAppointment.calendarId) {
+          // Sync in background - don't block appointment deletion
+          calendarSyncService.syncAppointmentToCalendar(existingAppointment.id, 'DELETE')
+            .catch(err => {
+              request.log.error({ err, appointmentId: existingAppointment.id },
+                'Failed to sync appointment deletion to Google Calendar');
+            });
+        }
+      }
+
+      // Mark as cancelled instead of deleting
+      const cancelledAppointment = await prisma.appointment.update({
+        where: { id },
+        data: { status: 'CANCELLED' },
+        include: {
+          client: { select: { id: true, name: true } },
+          call: { select: { id: true, callSid: true, callerNumber: true } },
+        },
+      });
+
+      return { data: cancelledAppointment, message: 'Appointment cancelled successfully' };
+    } catch (err) {
+      throw err;
+    }
+  });
+
+  /**
    * GET /api/analytics
    * Get call analytics and statistics
+   * Rate limited: 10 req/min (staff), 20 req/min (admin) - protects database from expensive queries
    */
-  fastify.get('/api/analytics', async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/api/analytics', {
+    config: {
+      rateLimit: {
+        ...RATE_LIMIT_PRESETS.ANALYTICS,
+        max: (request: any) => request.user?.role === 'ADMIN' ? 20 : 10,
+        keyGenerator: KEY_GENERATORS.byUser,
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const query = analyticsQuerySchema.parse(request.query);
-      const { from, to, clientId } = query;
+      const { from, to } = query;
 
       // Default to last 30 days if no date range specified
       const endDate = to ? new Date(to) : new Date();
       const startDate = from ? new Date(from) : new Date(endDate.getTime() - 30 * 24 * 60 * 60 * 1000);
 
+      // Get clientId from authenticated user
+      const clientId = request.user!.clientId;
+
       const where: any = {
+        clientId, // Always filter by user's client
         startTime: {
           gte: startDate,
           lte: endDate,
         },
       };
-      if (clientId) where.clientId = clientId;
 
       // Get all stats in parallel
       const [
@@ -209,6 +433,10 @@ export async function apiRoutes(fastify: FastifyInstance) {
         avgDuration,
         appointmentsCreated,
         callsPerDay,
+        appointmentsByStatus,
+        callsByHour,
+        uniqueCustomers,
+        returningCustomers,
       ] = await Promise.all([
         // Total calls
         prisma.call.count({ where }),
@@ -264,12 +492,66 @@ export async function apiRoutes(fastify: FastifyInstance) {
               GROUP BY DATE("startTime")
               ORDER BY date ASC
             ` as Promise<{ date: Date; count: number }[]>,
+
+        // Appointments by status
+        prisma.appointment.groupBy({
+          by: ['status'],
+          where: {
+            createdAt: { gte: startDate, lte: endDate },
+            ...(clientId ? { clientId } : {}),
+          },
+          _count: { status: true },
+        }),
+
+        // Calls by hour (peak times)
+        clientId
+          ? prisma.$queryRaw`
+              SELECT
+                EXTRACT(HOUR FROM "startTime")::int as hour,
+                COUNT(*)::int as count
+              FROM "Call"
+              WHERE "startTime" >= ${startDate}
+                AND "startTime" <= ${endDate}
+                AND "clientId" = ${clientId}
+              GROUP BY EXTRACT(HOUR FROM "startTime")
+              ORDER BY hour ASC
+            ` as Promise<{ hour: number; count: number }[]>
+          : prisma.$queryRaw`
+              SELECT
+                EXTRACT(HOUR FROM "startTime")::int as hour,
+                COUNT(*)::int as count
+              FROM "Call"
+              WHERE "startTime" >= ${startDate}
+                AND "startTime" <= ${endDate}
+              GROUP BY EXTRACT(HOUR FROM "startTime")
+              ORDER BY hour ASC
+            ` as Promise<{ hour: number; count: number }[]>,
+
+        // Unique customers (by phone number) - grouped to get call counts
+        prisma.call.groupBy({
+          by: ['callerNumber'],
+          where,
+          _count: { callerNumber: true },
+        }),
+
+        // Placeholder for returning customers (will calculate from uniqueCustomers)
+        Promise.resolve([]),
       ]);
 
-      // Calculate appointment booking rate
-      const appointmentIntentCalls = callsByIntent.find(c => c.intent === 'appointment_booking')?._count?.intent || 0;
-      const bookingSuccessRate = appointmentIntentCalls > 0
-        ? (appointmentsCreated / appointmentIntentCalls) * 100
+      // Calculate appointment booking rate (appointments per total calls)
+      const bookingSuccessRate = totalCalls > 0
+        ? (appointmentsCreated / totalCalls) * 100
+        : 0;
+
+      // Calculate customer retention metrics
+      // Filter customers who have called more than once
+      const customersWithCallCounts = uniqueCustomers;
+      const totalUniqueCustomers = customersWithCallCounts.length;
+      const totalReturningCustomers = customersWithCallCounts.filter(
+        c => c._count.callerNumber > 1
+      ).length;
+      const retentionRate = totalUniqueCustomers > 0
+        ? (totalReturningCustomers / totalUniqueCustomers) * 100
         : 0;
 
       return {
@@ -279,6 +561,9 @@ export async function apiRoutes(fastify: FastifyInstance) {
             avgDurationSeconds: Math.round(avgDuration._avg.duration || 0),
             appointmentsCreated,
             bookingSuccessRate: Math.round(bookingSuccessRate * 10) / 10,
+            uniqueCustomers: totalUniqueCustomers,
+            returningCustomers: totalReturningCustomers,
+            retentionRate: Math.round(retentionRate * 10) / 10,
           },
           callsByStatus: callsByStatus.map(s => ({
             status: s.status,
@@ -287,6 +572,14 @@ export async function apiRoutes(fastify: FastifyInstance) {
           callsByIntent: callsByIntent.map(i => ({
             intent: i.intent,
             count: i._count.intent,
+          })),
+          appointmentsByStatus: appointmentsByStatus.map(a => ({
+            status: a.status,
+            count: a._count.status,
+          })),
+          callsByHour: callsByHour.map(h => ({
+            hour: h.hour,
+            count: h.count,
           })),
           callsPerDay,
           dateRange: {
@@ -307,15 +600,20 @@ export async function apiRoutes(fastify: FastifyInstance) {
   /**
    * GET /api/client/settings
    * Get client configuration
+   * Rate limited: 60 req/min per user
    */
-  fastify.get('/api/client/settings', async (request: FastifyRequest<{ Querystring: { clientId?: string } }>, reply: FastifyReply) => {
-    const { clientId } = request.query;
-
-    // For now, get the first client or by ID
-    // In production, this would be based on authenticated user
-    const client = clientId
-      ? await prisma.client.findUnique({ where: { id: clientId } })
-      : await prisma.client.findFirst();
+  fastify.get('/api/client/settings', {
+    config: {
+      rateLimit: {
+        ...RATE_LIMIT_PRESETS.API_STANDARD,
+        keyGenerator: KEY_GENERATORS.byUser,
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    // Get user's client
+    const client = await prisma.client.findUnique({
+      where: { id: request.user!.clientId },
+    });
 
     if (!client) {
       reply.code(404);
@@ -343,25 +641,24 @@ export async function apiRoutes(fastify: FastifyInstance) {
 
   /**
    * PUT /api/client/settings
-   * Update client configuration
+   * Update client configuration (Admin only)
+   * Rate limited: 30 req/min per user (write operation)
    */
-  fastify.put('/api/client/settings', async (request: FastifyRequest<{ Querystring: { clientId?: string } }>, reply: FastifyReply) => {
+  fastify.put('/api/client/settings', {
+    preHandler: requireRole('ADMIN'),
+    config: {
+      rateLimit: {
+        max: 30,
+        timeWindow: '1 minute',
+        keyGenerator: KEY_GENERATORS.byUser,
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const { clientId } = request.query;
       const updates = updateClientSettingsSchema.parse(request.body);
 
-      // Get client to update
-      const existingClient = clientId
-        ? await prisma.client.findUnique({ where: { id: clientId } })
-        : await prisma.client.findFirst();
-
-      if (!existingClient) {
-        reply.code(404);
-        return { error: 'Client not found' };
-      }
-
       const updatedClient = await prisma.client.update({
-        where: { id: existingClient.id },
+        where: { id: request.user!.clientId },
         data: updates,
       });
 
@@ -370,8 +667,9 @@ export async function apiRoutes(fastify: FastifyInstance) {
         data: {
           eventType: 'settings_updated',
           severity: 'info',
-          message: `Client settings updated`,
-          clientId: existingClient.id,
+          message: `Client settings updated by ${request.user!.email}`,
+          clientId: request.user!.clientId,
+          userId: request.user!.userId,
           details: { updates } as any,
         },
       });

@@ -8,6 +8,8 @@ import { claudeService } from '../services/ai/claude.service.js';
 import { intentClassifier } from '../services/business-logic/intent.classifier.js';
 import { appointmentHandler } from '../services/business-logic/appointment.handler.js';
 import { incrementalExtractor } from '../services/business-logic/incremental-extractor.service.js';
+import { calendarSyncService } from '../services/integrations/calendar-sync.service.js';
+import { RATE_LIMIT_PRESETS, KEY_GENERATORS } from '../config/rate-limits.js';
 // Prompts are now managed in the database via Client.llmSystemPrompt
 import type {
   TwilioIncomingCallEvent,
@@ -42,9 +44,18 @@ export async function webhookRoutes(fastify: FastifyInstance) {
   /**
    * POST /webhooks/twilio/voice
    * Called when a call comes in
+   * Soft rate limit: 100 req/min per IP (high threshold to catch extreme abuse only)
    */
   fastify.post(
     '/webhooks/twilio/voice',
+    {
+      config: {
+        rateLimit: {
+          ...RATE_LIMIT_PRESETS.WEBHOOK_SOFT,
+          keyGenerator: KEY_GENERATORS.byIP,
+        },
+      },
+    },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
         const event = incomingCallSchema.parse(request.body) as TwilioIncomingCallEvent;
@@ -139,9 +150,18 @@ export async function webhookRoutes(fastify: FastifyInstance) {
   /**
    * POST /webhooks/twilio/gather
    * Called after user speaks (speech recognition result)
+   * CRITICAL: Rate limited to prevent Claude API abuse (10 req/min per IP+CallSid)
    */
   fastify.post(
     '/webhooks/twilio/gather',
+    {
+      config: {
+        rateLimit: {
+          ...RATE_LIMIT_PRESETS.AI_CLAUDE,
+          keyGenerator: KEY_GENERATORS.byIPAndCallSid,
+        },
+      },
+    },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
         const event = gatherSchema.parse(request.body) as TwilioGatherEvent;
@@ -158,10 +178,15 @@ export async function webhookRoutes(fastify: FastifyInstance) {
           return twilioService.createSayAndHangup('Es tut mir leid, ein Fehler ist aufgetreten.');
         }
 
-        // Get client config early for TTS selection
-        const client = await prisma.client.findUnique({
-          where: { id: session.clientId },
-        });
+        // Optimize: Fetch both client and call in a single query to reduce DB calls
+        const [client, call] = await Promise.all([
+          prisma.client.findUnique({
+            where: { id: session.clientId },
+          }),
+          prisma.call.findFirst({
+            where: { callSid: event.CallSid },
+          }),
+        ]);
 
         if (!client) {
           reply.type('text/xml');
@@ -189,11 +214,7 @@ export async function webhookRoutes(fastify: FastifyInstance) {
         // Add user message to session
         await callSessionManager.addMessage(event.CallSid, 'user', userSpeech);
 
-        // Save user message to database
-        const call = await prisma.call.findFirst({
-          where: { callSid: event.CallSid },
-        });
-
+        // Save user message to database (call was fetched earlier)
         if (call) {
           await prisma.message.create({
             data: {
@@ -202,12 +223,6 @@ export async function webhookRoutes(fastify: FastifyInstance) {
               content: userSpeech,
             },
           });
-        }
-
-        // Client is already fetched above, continue with existing logic
-        if (!client) {
-          reply.type('text/xml');
-          return twilioService.createSayAndHangup('Es tut mir leid, ein Fehler ist aufgetreten.');
         }
 
         // Check if user is explicitly requesting a NEW appointment
@@ -310,11 +325,24 @@ export async function webhookRoutes(fastify: FastifyInstance) {
                 throw new Error('Call record not found');
               }
 
-              await appointmentHandler.createAppointment(
+              const appointment = await appointmentHandler.createAppointment(
                 call.id,
                 client.id,
                 updatedData
               );
+
+              // Sync to Google Calendar if enabled
+              if (appointment && client.integrations) {
+                const googleCalendarConfig = (client.integrations as any)?.googleCalendar;
+                if (googleCalendarConfig?.enabled) {
+                  // Sync in background - don't block appointment creation
+                  calendarSyncService.syncAppointmentToCalendar(appointment.id, 'CREATE')
+                    .catch(err => {
+                      fastify.log.error({ err, appointmentId: appointment.id },
+                        'Failed to sync appointment to Google Calendar');
+                    });
+                }
+              }
 
               const confirmation = appointmentHandler.generateConfirmation(updatedData);
               await callSessionManager.addMessage(event.CallSid, 'assistant', confirmation);
@@ -462,9 +490,18 @@ export async function webhookRoutes(fastify: FastifyInstance) {
   /**
    * POST /webhooks/twilio/status
    * Called when call status changes
+   * Soft rate limit: 100 req/min per IP (high threshold to catch extreme abuse only)
    */
   fastify.post(
     '/webhooks/twilio/status',
+    {
+      config: {
+        rateLimit: {
+          ...RATE_LIMIT_PRESETS.WEBHOOK_SOFT,
+          keyGenerator: KEY_GENERATORS.byIP,
+        },
+      },
+    },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
         const event = statusCallbackSchema.parse(request.body) as TwilioCallStatusEvent;

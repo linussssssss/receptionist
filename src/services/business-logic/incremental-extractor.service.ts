@@ -52,17 +52,18 @@ export class IncrementalAppointmentExtractor {
   private buildPromptForExtraction(existingData: AppointmentData): string {
     const missing = this.getMissingFields(existingData);
 
-    // Get current date for context
+    // Get current date for context with weekday
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentDateStr = now.toISOString().split('T')[0];
+    const weekdayName = now.toLocaleDateString('de-DE', { weekday: 'long' });
 
     if (missing.length === 0) {
-      return `Heute ist ${currentDateStr}. Extrahiere alle Termininformationen aus der nächsten Nachricht: Datum (YYYY-MM-DD, verwende ${currentYear} für zukünftige Termine), Uhrzeit, Name, Telefonnummer.`;
+      return `Heute ist ${weekdayName}, der ${currentDateStr}. Extrahiere alle Termininformationen aus der nächsten Nachricht: Datum (YYYY-MM-DD), Uhrzeit, Name, Telefonnummer. WICHTIG: Wenn der Nutzer den Wochentag "${weekdayName}" nennt, meint er HEUTE (${currentDateStr}).`;
     }
 
     const fieldNames: Record<string, string> = {
-      date: `Datum (im Format YYYY-MM-DD, heute ist ${currentDateStr}, verwende ${currentYear} für zukünftige Termine oder ${currentYear + 1} falls das Datum dieses Jahr schon vorbei ist)`,
+      date: `Datum (im Format YYYY-MM-DD, heute ist ${weekdayName}, der ${currentDateStr}. WICHTIG: Wenn der Nutzer "${weekdayName}" sagt, verwende ${currentDateStr}. Wenn ein Wochentag in der Zukunft genannt wird, berechne das nächste Datum dieses Wochentags)`,
       time: 'Uhrzeit (im Format HH:MM)',
       name: 'Name der Person (auch bei Satzzeichen wie "Max," oder "Max." nur den Namen extrahieren)',
       phone: 'Telefonnummer (alle Ziffern zusammen, ohne Leerzeichen)',

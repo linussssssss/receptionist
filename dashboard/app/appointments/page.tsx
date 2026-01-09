@@ -20,7 +20,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ChevronLeft, ChevronRight, Filter, Calendar, Phone } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Filter, Calendar, Phone, MoreVertical, Edit, XCircle, Mail, Bell, BellOff, Clock } from 'lucide-react';
 
 const STATUS_COLORS: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   PENDING: 'outline',
@@ -59,6 +59,13 @@ export default function AppointmentsPage() {
     }
 
     fetchAppointments();
+
+    // Auto-refresh every 30 seconds
+    const interval = setInterval(() => {
+      fetchAppointments();
+    }, 30000);
+
+    return () => clearInterval(interval);
   }, [page, statusFilter]);
 
   const formatDate = (dateString: string) => {
@@ -69,6 +76,27 @@ export default function AppointmentsPage() {
       hour: '2-digit',
       minute: '2-digit',
     });
+  };
+
+  const handleCancelAppointment = async (id: string) => {
+    if (!confirm('Are you sure you want to cancel this appointment?')) {
+      return;
+    }
+
+    try {
+      await api.cancelAppointment(id);
+      // Refresh the appointments list
+      const response = await api.getAppointments({
+        page,
+        limit: 20,
+        status: statusFilter,
+      });
+      setAppointments(response.data);
+      setTotalPages(response.pagination?.totalPages || 1);
+    } catch (err) {
+      alert('Failed to cancel appointment');
+      console.error(err);
+    }
   };
 
   if (loading) {
@@ -144,18 +172,21 @@ export default function AppointmentsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Date & Time</TableHead>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Client</TableHead>
-                  <TableHead>Duration</TableHead>
-                  <TableHead>Call</TableHead>
+                  <TableHead className="w-[140px]">Date & Time</TableHead>
+                  <TableHead className="w-[140px]">Customer</TableHead>
+                  <TableHead className="w-[110px]">Email</TableHead>
+                  <TableHead className="w-[90px]">Status</TableHead>
+                  <TableHead className="w-[90px]">Reminder</TableHead>
+                  <TableHead className="w-[100px]">Client</TableHead>
+                  <TableHead className="w-[70px]">Duration</TableHead>
+                  <TableHead className="w-[90px]">Call</TableHead>
+                  <TableHead className="w-[50px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {appointments.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-gray-500">
+                    <TableCell colSpan={9} className="text-center text-gray-500">
                       No appointments found
                     </TableCell>
                   </TableRow>
@@ -183,28 +214,91 @@ export default function AppointmentsPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={STATUS_COLORS[appointment.status] || 'outline'}>
+                        {appointment.customerEmail ? (
+                          <div className="flex items-center gap-1 text-xs text-gray-700">
+                            <Mail className="h-3 w-3 text-gray-400 flex-shrink-0" />
+                            <span className="max-w-[80px] truncate" title={appointment.customerEmail}>
+                              {appointment.customerEmail}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={STATUS_COLORS[appointment.status] || 'outline'} className="text-xs">
                           {appointment.status}
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <span className="text-sm">{appointment.client.name}</span>
+                        {appointment.customerEmail ? (
+                          appointment.reminderSent ? (
+                            <div className="flex items-center gap-1">
+                              <Badge variant="secondary" className="flex items-center gap-1 text-xs px-2 py-0">
+                                <Bell className="h-3 w-3" />
+                                <span className="hidden sm:inline">Sent</span>
+                              </Badge>
+                              {appointment.reminderSentAt && (
+                                <span className="text-xs text-gray-400 hidden lg:inline" title={new Date(appointment.reminderSentAt).toLocaleString('de-DE')}>
+                                  <Clock className="h-3 w-3 inline" />
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <Badge variant="outline" className="flex items-center gap-1 text-xs px-2 py-0">
+                              <BellOff className="h-3 w-3" />
+                              <span className="hidden sm:inline">Pending</span>
+                            </Badge>
+                          )
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
                       </TableCell>
                       <TableCell>
-                        <span className="text-sm">{appointment.durationMinutes || 30} min</span>
+                        <span className="text-xs truncate block max-w-[100px]" title={appointment.client.name}>{appointment.client.name}</span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-xs">{appointment.durationMinutes || 30}m</span>
                       </TableCell>
                       <TableCell>
                         {appointment.call ? (
                           <Button
                             variant="ghost"
                             size="sm"
+                            className="h-7 px-2 text-xs"
                             onClick={() => router.push(`/calls/${appointment.call!.id}`)}
                           >
-                            View Call
+                            View
                           </Button>
                         ) : (
-                          <span className="text-sm text-gray-400">-</span>
+                          <span className="text-xs text-gray-400">-</span>
                         )}
+                      </TableCell>
+                      <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              onClick={() => router.push(`/appointments/${appointment.id}/edit`)}
+                              disabled={appointment.status === 'CANCELLED' || appointment.status === 'COMPLETED'}
+                            >
+                              <Edit className="mr-2 h-4 w-4" />
+                              Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleCancelAppointment(appointment.id)}
+                              disabled={appointment.status === 'CANCELLED' || appointment.status === 'COMPLETED'}
+                              className="text-red-600"
+                            >
+                              <XCircle className="mr-2 h-4 w-4" />
+                              Cancel
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </TableCell>
                     </TableRow>
                   ))

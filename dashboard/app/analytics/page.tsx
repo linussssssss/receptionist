@@ -13,6 +13,10 @@ import {
   TrendingDown,
   BarChart3,
   Users,
+  UserCheck,
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
 } from 'lucide-react';
 
 export default function AnalyticsPage() {
@@ -71,14 +75,15 @@ export default function AnalyticsPage() {
 
   if (!analytics) return null;
 
-  const { summary, callsByStatus, callsByIntent, callsPerDay } = analytics;
+  const { summary, callsByStatus, callsByIntent, callsPerDay, appointmentsByStatus, callsByHour } = analytics;
 
-  // Calculate trends
-  const recentCalls = callsPerDay.slice(0, 7);
-  const olderCalls = callsPerDay.slice(7, 14);
+  // Calculate trends (need at least 14 days of data)
+  const hasEnoughData = callsPerDay.length >= 14;
+  const recentCalls = hasEnoughData ? callsPerDay.slice(0, 7) : [];
+  const olderCalls = hasEnoughData ? callsPerDay.slice(7, 14) : [];
   const recentTotal = recentCalls.reduce((sum, day) => sum + day.count, 0);
   const olderTotal = olderCalls.reduce((sum, day) => sum + day.count, 0);
-  const callTrend = olderTotal > 0 ? ((recentTotal - olderTotal) / olderTotal) * 100 : 0;
+  const callTrend = hasEnoughData && olderTotal > 0 ? ((recentTotal - olderTotal) / olderTotal) * 100 : 0;
 
   // Calculate completion rate
   const completedCalls = callsByStatus.find((s) => s.status === 'COMPLETED')?.count || 0;
@@ -119,7 +124,7 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Key Metrics */}
-        <div className="mb-8 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="mb-8 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Calls</CardTitle>
@@ -127,17 +132,23 @@ export default function AnalyticsPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{summary.totalCalls}</div>
-              <div className="flex items-center text-xs mt-1">
-                {callTrend > 0 ? (
-                  <TrendingUp className="h-3 w-3 text-green-600 mr-1" />
-                ) : (
-                  <TrendingDown className="h-3 w-3 text-red-600 mr-1" />
-                )}
-                <span className={callTrend > 0 ? 'text-green-600' : 'text-red-600'}>
-                  {Math.abs(callTrend).toFixed(1)}%
-                </span>
-                <span className="text-gray-500 ml-1">vs previous period</span>
-              </div>
+              {hasEnoughData ? (
+                <div className="flex items-center text-xs mt-1">
+                  {callTrend > 0 ? (
+                    <TrendingUp className="h-3 w-3 text-green-600 mr-1" />
+                  ) : callTrend < 0 ? (
+                    <TrendingDown className="h-3 w-3 text-red-600 mr-1" />
+                  ) : (
+                    <div className="h-3 w-3 mr-1" />
+                  )}
+                  <span className={callTrend > 0 ? 'text-green-600' : callTrend < 0 ? 'text-red-600' : 'text-gray-600'}>
+                    {callTrend !== 0 ? `${callTrend > 0 ? '+' : ''}${callTrend.toFixed(1)}%` : '0.0%'}
+                  </span>
+                  <span className="text-gray-500 ml-1">vs previous period</span>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500 mt-1">Need more data for trends</p>
+              )}
             </CardContent>
           </Card>
 
@@ -179,6 +190,32 @@ export default function AnalyticsPage() {
               </p>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Unique Customers</CardTitle>
+              <Users className="h-4 w-4 text-gray-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{summary.uniqueCustomers}</div>
+              <p className="text-xs text-gray-500 mt-1">
+                {summary.returningCustomers} returning
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Retention Rate</CardTitle>
+              <UserCheck className="h-4 w-4 text-gray-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{summary.retentionRate.toFixed(1)}%</div>
+              <p className="text-xs text-gray-500 mt-1">
+                Customers with multiple calls
+              </p>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Call Volume Over Time */}
@@ -217,6 +254,98 @@ export default function AnalyticsPage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Appointments and Peak Times */}
+        <div className="mb-8 grid gap-4 md:grid-cols-2">
+          {/* Appointment Status Breakdown */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Appointment Status</CardTitle>
+              <CardDescription>Breakdown of appointment outcomes</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {appointmentsByStatus && appointmentsByStatus.length > 0 ? (
+                  appointmentsByStatus.map((item) => {
+                    const percentage = summary.appointmentsCreated > 0 ? (item.count / summary.appointmentsCreated) * 100 : 0;
+                    const statusColors: Record<string, string> = {
+                      CONFIRMED: 'bg-green-600',
+                      PENDING: 'bg-yellow-600',
+                      COMPLETED: 'bg-blue-600',
+                      CANCELLED: 'bg-red-600',
+                      NO_SHOW: 'bg-gray-600',
+                      RESCHEDULED: 'bg-purple-600',
+                    };
+
+                    return (
+                      <div key={item.status} className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline">{item.status}</Badge>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-gray-500">
+                              {percentage.toFixed(1)}%
+                            </span>
+                            <span className="font-medium">{item.count}</span>
+                          </div>
+                        </div>
+                        <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${statusColors[item.status] || 'bg-gray-600'}`}
+                            style={{ width: `${percentage}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="text-center text-sm text-gray-500 py-4">
+                    No appointments data available
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Peak Times */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Peak Call Hours</CardTitle>
+              <CardDescription>Busiest hours of the day</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {callsByHour && callsByHour.length > 0 ? (
+                  callsByHour.map((item) => {
+                    const maxCount = Math.max(...callsByHour.map((h) => h.count));
+                    const percentage = maxCount > 0 ? (item.count / maxCount) * 100 : 0;
+                    const hourDisplay = `${item.hour.toString().padStart(2, '0')}:00`;
+
+                    return (
+                      <div key={item.hour} className="space-y-1">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-gray-600">{hourDisplay}</span>
+                          <span className="font-medium">{item.count} calls</span>
+                        </div>
+                        <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-orange-600 rounded-full transition-all"
+                            style={{ width: `${percentage}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="text-center text-sm text-gray-500 py-4">
+                    No hourly data available
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
 
         {/* Distribution Charts */}
         <div className="mb-8 grid gap-4 md:grid-cols-2">
@@ -329,13 +458,25 @@ export default function AnalyticsPage() {
               </div>
 
               <div className="flex items-start gap-3 p-3 bg-purple-50 rounded-lg">
-                <Users className="h-5 w-5 text-purple-600 mt-0.5" />
+                <Clock className="h-5 w-5 text-purple-600 mt-0.5" />
                 <div>
                   <div className="font-medium text-purple-900">
                     Average Call Duration: {formatDuration(summary.avgDurationSeconds)}
                   </div>
                   <div className="text-sm text-purple-700">
                     The average conversation length suggests efficient call handling.
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3 p-3 bg-indigo-50 rounded-lg">
+                <UserCheck className="h-5 w-5 text-indigo-600 mt-0.5" />
+                <div>
+                  <div className="font-medium text-indigo-900">
+                    Customer Retention: {summary.retentionRate.toFixed(1)}%
+                  </div>
+                  <div className="text-sm text-indigo-700">
+                    {summary.returningCustomers} of {summary.uniqueCustomers} customers have called multiple times.
                   </div>
                 </div>
               </div>
