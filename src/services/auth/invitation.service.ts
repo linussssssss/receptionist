@@ -2,6 +2,7 @@ import { Invitation, User } from '@prisma/client';
 import { prisma } from '../../server.js';
 import { authService, CreateUserInput } from './auth.service.js';
 import { emailService } from '../notifications/email.service.js';
+import { env } from '../../config/env.js';
 import pino from 'pino';
 
 const logger = pino({ name: 'invitation-service' });
@@ -249,7 +250,7 @@ class InvitationService {
   ): Promise<void> {
     try {
       // Build invitation URL
-      const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+      const baseUrl = env.FRONTEND_URL;
       const invitationUrl = `${baseUrl}/register?token=${invitation.token}`;
 
       // Build email content

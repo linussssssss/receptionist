@@ -72,6 +72,9 @@ const envSchema = z.object({
   DAILY_DIGEST_ENABLED: z.string().default('true').transform((val) => val === 'true'),
   DAILY_DIGEST_HOUR: z.string().default('8').transform((val) => parseInt(val, 10)), // 0-23
 
+  // Frontend URL (for invitation emails)
+  FRONTEND_URL: z.string().url().default('http://localhost:3001'),
+
   // CORS
   ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),
 });
