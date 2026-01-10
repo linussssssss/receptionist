@@ -6,6 +6,7 @@ import { appointmentReminderJob } from './appointment-reminder.job.js';
 import { sessionCleanupJob } from './session-cleanup.job.js';
 import { invitationCleanupJob } from './invitation-cleanup.job.js';
 import { dailyDigestJob } from './daily-digest.job.js';
+import { dataRetentionJob } from './data-retention-scheduled.job.js';
 
 export interface ScheduledJob {
   name: string;
@@ -20,6 +21,7 @@ const jobs: ScheduledJob[] = [
   sessionCleanupJob,
   invitationCleanupJob,
   dailyDigestJob,
+  dataRetentionJob,
 ];
 
 const scheduledTasks: cron.ScheduledTask[] = [];

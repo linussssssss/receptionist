@@ -9,6 +9,7 @@ import { authRoutes } from './routes/auth.js';
 import { apiRoutes } from './routes/api.js';
 import { audioRoutes } from './routes/audio.js';
 import { integrationRoutes } from './routes/integrations.js';
+import { gdprRoutes } from './routes/gdpr.js';
 import fastifyFormbody from '@fastify/formbody';
 import { startScheduledJobs, stopScheduledJobs } from './jobs/scheduler.js';
 import { redisService } from './config/redis.js';
@@ -84,6 +85,7 @@ await fastify.register(authRoutes);
 await fastify.register(apiRoutes);
 await fastify.register(audioRoutes);
 await fastify.register(integrationRoutes);
+await fastify.register(gdprRoutes);
 
 // Health check endpoint
 fastify.get('/health', async (_request, reply) => {

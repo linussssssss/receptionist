@@ -524,6 +524,213 @@ Get sync history.
 
 ---
 
+## GDPR / Data Privacy
+
+Endpoints for GDPR compliance including data subject search and Right to Erasure (Article 17).
+
+### POST /api/gdpr/search
+
+Search for all data belonging to a data subject by phone or email.
+
+**Authentication:** Required
+
+**Rate Limit:** 60 req/min per user
+
+**Request:**
+```json
+{
+  "identifier": "+491234567890",
+  "identifierType": "phone"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "found": true,
+    "callCount": 5,
+    "messageCount": 23,
+    "appointmentCount": 2,
+    "calls": [
+      {
+        "id": "cuid123",
+        "startTime": "2024-01-15T10:30:00.000Z",
+        "status": "COMPLETED",
+        "duration": 120
+      }
+    ],
+    "appointments": [
+      {
+        "id": "appt123",
+        "datetime": "2024-01-20T14:00:00.000Z",
+        "status": "CONFIRMED",
+        "customerName": "John Doe"
+      }
+    ]
+  }
+}
+```
+
+### GET /api/gdpr/erasure-requests
+
+List all erasure requests for the client.
+
+**Authentication:** Required (ADMIN)
+
+**Rate Limit:** 60 req/min per user
+
+**Query Parameters:**
+- `status`: PENDING, APPROVED, EXECUTED, REJECTED (optional filter)
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "erasure123",
+      "subjectIdentifierMasked": "****7890",
+      "status": "PENDING",
+      "requestedBy": "user123",
+      "approvedBy": null,
+      "executedAt": null,
+      "recordsDeleted": null,
+      "createdAt": "2024-01-15T10:30:00.000Z"
+    }
+  ]
+}
+```
+
+### POST /api/gdpr/erasure-requests
+
+Create a new erasure request (Right to be Forgotten).
+
+**Authentication:** Required
+
+**Rate Limit:** 60 req/min per user
+
+**Request:**
+```json
+{
+  "identifier": "+491234567890",
+  "identifierType": "phone"
+}
+```
+
+**Response (201):**
+```json
+{
+  "success": true,
+  "data": {
+    "requestId": "erasure123",
+    "status": "PENDING",
+    "message": "Erasure request created. Requires admin approval before execution.",
+    "dataFound": {
+      "calls": 5,
+      "messages": 23,
+      "appointments": 2
+    }
+  }
+}
+```
+
+### GET /api/gdpr/erasure-requests/:id
+
+Get details of a specific erasure request.
+
+**Authentication:** Required (ADMIN)
+
+**Rate Limit:** 60 req/min per user
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "erasure123",
+    "subjectIdentifierMasked": "****7890",
+    "status": "APPROVED",
+    "requestedBy": "user123",
+    "approvedBy": "admin456",
+    "executedAt": null,
+    "recordsDeleted": null,
+    "createdAt": "2024-01-15T10:30:00.000Z"
+  }
+}
+```
+
+### POST /api/gdpr/erasure-requests/:id/approve
+
+Approve an erasure request.
+
+**Authentication:** Required (ADMIN)
+
+**Rate Limit:** 60 req/min per user
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Erasure request approved. You can now execute the erasure."
+}
+```
+
+### POST /api/gdpr/erasure-requests/:id/reject
+
+Reject an erasure request with a reason.
+
+**Authentication:** Required (ADMIN)
+
+**Rate Limit:** 60 req/min per user
+
+**Request:**
+```json
+{
+  "reason": "Data retention period not yet expired for legal compliance."
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Erasure request rejected."
+}
+```
+
+### POST /api/gdpr/erasure-requests/:id/execute
+
+Execute an approved erasure request. **This action is IRREVERSIBLE.**
+
+**Authentication:** Required (ADMIN)
+
+**Rate Limit:** 5 req/hour per user (strict limit)
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Data erasure completed successfully.",
+  "data": {
+    "deletedCalls": 5,
+    "deletedMessages": 23,
+    "anonymizedAppointments": 2
+  }
+}
+```
+
+**Error Response (400 - Not approved):**
+```json
+{
+  "success": false,
+  "error": "Request must be approved before execution (current status: PENDING)"
+}
+```
+
+---
+
 ## Twilio Webhooks
 
 These endpoints are called by Twilio during phone calls.
