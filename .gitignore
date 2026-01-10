@@ -39,6 +39,7 @@ test-auth.js
 test-appointment-flow.ts
 test-full-integration.ts
 test-email.ts
+test-digest.ts
 
 # Prisma
 prisma/migrations/*

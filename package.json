@@ -13,7 +13,10 @@
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed-admin": "tsx prisma/seed-admin.ts",
-    "test": "echo \"Tests coming soon\" && exit 0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:ui": "vitest --ui",
     "lint": "tsc --noEmit",
     "test:delta-sync": "tsx scripts/verify-delta-sync.ts",
     "test:webhook-renewal": "tsx scripts/test-webhook-renewal.ts",
@@ -71,9 +74,12 @@
     "@types/node-cron": "^3.0.11",
     "@types/twilio": "^3.19.2",
     "@types/ws": "^8.18.1",
+    "@vitest/coverage-v8": "^4.0.16",
     "nodemon": "^3.1.11",
     "prisma": "^6.1.0",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.16",
+    "vitest-mock-extended": "^3.1.0"
   }
 }

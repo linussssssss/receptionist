@@ -1,4 +1,3 @@
-import { captureError } from '../config/sentry.js';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import rateLimit from '@fastify/rate-limit';
