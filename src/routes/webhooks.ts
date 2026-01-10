@@ -93,7 +93,7 @@ export async function webhookRoutes(fastify: FastifyInstance) {
           );
         }
 
-        // Create call record in database
+        // Create call record in database (consent not yet given)
         const call = await prisma.call.create({
           data: {
             callSid: event.CallSid,
@@ -101,6 +101,7 @@ export async function webhookRoutes(fastify: FastifyInstance) {
             callerNumber: event.From,
             callerName: event.CallerName,
             status: 'RINGING',
+            consentGiven: false,
           },
         });
 
@@ -119,13 +120,133 @@ export async function webhookRoutes(fastify: FastifyInstance) {
           },
         });
 
-        // Respond with greeting and gather input
+        // GDPR: Start with consent announcement if required
+        const requireConsent = (client as any).requireExplicitConsent !== false;
+        const consentActionUrl = `${env.TWILIO_WEBHOOK_URL}/webhooks/twilio/consent`;
+
+        reply.type('text/xml');
+
+        if (requireConsent) {
+          // Play consent announcement first
+          return twilioService.createConsentAnnouncementResponse(
+            (client as any).gdprConsentMessage || null,
+            consentActionUrl,
+            (client as any).useElevenLabsTTS && client.voiceId ? true : false,
+            env.TWILIO_WEBHOOK_URL || '',
+            client.id
+          );
+        } else {
+          // Skip consent, go directly to greeting
+          const greeting = client.greetingMessage || 'Guten Tag, wie kann ich Ihnen helfen?';
+          const actionUrl = `${env.TWILIO_WEBHOOK_URL}/webhooks/twilio/gather`;
+
+          // Use ElevenLabs if enabled, otherwise use Twilio Polly
+          if ((client as any).useElevenLabsTTS && client.voiceId) {
+            return twilioService.createGreetingResponseWithElevenLabs(
+              greeting,
+              env.TWILIO_WEBHOOK_URL || '',
+              client.id,
+              actionUrl
+            );
+          } else {
+            return twilioService.createGreetingResponse(greeting, actionUrl);
+          }
+        }
+        
+      } catch (err) {
+        fastify.log.error({ err }, 'Error handling incoming call');
+        reply.type('text/xml');
+        return twilioService.createSayAndHangup(
+          'Es tut mir leid, ein Fehler ist aufgetreten. Auf Wiederhören.'
+        );
+      }
+    }
+  );
+
+  /**
+   * POST /webhooks/twilio/consent
+   * Called after the GDPR consent announcement
+   * Handles implicit consent (continuing call) or explicit human transfer request
+   */
+  fastify.post(
+    '/webhooks/twilio/consent',
+    {
+      config: {
+        rateLimit: {
+          ...RATE_LIMIT_PRESETS.WEBHOOK_SOFT,
+          keyGenerator: KEY_GENERATORS.byIP,
+        },
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const body = request.body as Record<string, string>;
+        const callSid = body.CallSid;
+        const speechResult = body.SpeechResult || '';
+        const implicitConsent = (request.query as Record<string, string>).implicitConsent === 'true';
+
+        fastify.log.info({ callSid, speechResult, implicitConsent }, 'Consent response received');
+
+        // Get session
+        const session = callSessionManager.getSession(callSid);
+        if (!session) {
+          fastify.log.warn({ callSid }, 'Session not found for consent');
+          reply.type('text/xml');
+          return twilioService.createSayAndHangup('Es tut mir leid, ein Fehler ist aufgetreten.');
+        }
+
+        // Fetch client
+        const client = await prisma.client.findUnique({
+          where: { id: session.clientId },
+        });
+
+        if (!client) {
+          reply.type('text/xml');
+          return twilioService.createSayAndHangup('Es tut mir leid, ein Fehler ist aufgetreten.');
+        }
+
+        // Check if user requested a human agent
+        const humanKeywords = ['mitarbeiter', 'mensch', 'person', 'verbinden', 'agent', 'support'];
+        const wantsHuman = humanKeywords.some(keyword =>
+          speechResult.toLowerCase().includes(keyword)
+        );
+
+        if (wantsHuman) {
+          // User doesn't want AI - transfer to human
+          fastify.log.info({ callSid }, 'Caller requested human agent during consent');
+          reply.type('text/xml');
+
+          // Check if escalation number is configured
+          const escalationRules = client.escalationRules as Record<string, unknown> | null;
+          const transferNumber = escalationRules?.transferNumber as string | undefined;
+
+          if (transferNumber) {
+            return twilioService.createForwardResponse(transferNumber);
+          } else {
+            return twilioService.createSayAndHangup(
+              'Leider ist momentan kein Mitarbeiter verfügbar. Bitte rufen Sie später noch einmal an. Auf Wiederhören.'
+            );
+          }
+        }
+
+        // Consent given (implicit by continuing or no human request)
+        // Update call record with consent
+        await prisma.call.updateMany({
+          where: { callSid },
+          data: {
+            consentGiven: true,
+            consentTimestamp: new Date(),
+          },
+        });
+
+        fastify.log.info({ callSid, implicit: implicitConsent }, 'GDPR consent recorded');
+
+        // Proceed to greeting
         const greeting = client.greetingMessage || 'Guten Tag, wie kann ich Ihnen helfen?';
         const actionUrl = `${env.TWILIO_WEBHOOK_URL}/webhooks/twilio/gather`;
 
         reply.type('text/xml');
 
-        // Use ElevenLabs if enabled, otherwise use Twilio Polly
         if ((client as any).useElevenLabsTTS && client.voiceId) {
           return twilioService.createGreetingResponseWithElevenLabs(
             greeting,
@@ -136,9 +257,9 @@ export async function webhookRoutes(fastify: FastifyInstance) {
         } else {
           return twilioService.createGreetingResponse(greeting, actionUrl);
         }
-        
+
       } catch (err) {
-        fastify.log.error({ err }, 'Error handling incoming call');
+        fastify.log.error({ err }, 'Error handling consent');
         reply.type('text/xml');
         return twilioService.createSayAndHangup(
           'Es tut mir leid, ein Fehler ist aufgetreten. Auf Wiederhören.'

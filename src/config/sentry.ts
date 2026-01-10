@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/node';
 import { env } from './env.js';
+import { redactString, redactObject } from '../utils/pii-redactor.js';
 
 let isInitialized = false;
 
@@ -30,7 +31,7 @@ export function initSentry(): void {
       /^429/,
     ],
 
-    // Strip sensitive data before sending
+    // Strip sensitive data before sending (GDPR/DSGVO compliance)
     beforeSend(event) {
       // Remove authorization headers
       if (event.request?.headers) {
@@ -48,6 +49,41 @@ export function initSentry(): void {
           delete (data as any).token;
           delete (data as any).refreshToken;
         }
+      }
+
+      // Redact PII from exception messages
+      if (event.exception?.values) {
+        event.exception.values = event.exception.values.map((ex) => {
+          if (ex.value && typeof ex.value === 'string') {
+            ex.value = redactString(ex.value);
+          }
+          return ex;
+        });
+      }
+
+      // Redact PII from breadcrumbs
+      if (event.breadcrumbs) {
+        event.breadcrumbs = event.breadcrumbs.map((crumb) => {
+          if (crumb.message && typeof crumb.message === 'string') {
+            crumb.message = redactString(crumb.message);
+          }
+          if (crumb.data && typeof crumb.data === 'object') {
+            crumb.data = redactObject(crumb.data);
+          }
+          return crumb;
+        });
+      }
+
+      // Redact PII from extra context
+      if (event.extra && typeof event.extra === 'object') {
+        event.extra = redactObject(event.extra);
+      }
+
+      // Redact user PII (keep id for tracking)
+      if (event.user) {
+        if (event.user.email) event.user.email = '[REDACTED]';
+        if (event.user.username) event.user.username = '[REDACTED]';
+        if (event.user.ip_address) event.user.ip_address = '[REDACTED]';
       }
 
       return event;
@@ -82,13 +118,14 @@ export function captureError(error: Error, context?: Record<string, unknown>): v
 /**
  * Set user context for error tracking
  * Call this after user authentication
+ * Note: Email is NOT sent to Sentry for GDPR compliance - only user ID
  */
-export function setUserContext(userId: string, clientId?: string, email?: string): void {
+export function setUserContext(userId: string, clientId?: string, _email?: string): void {
   if (!isInitialized) return;
 
+  // Only set user ID, not email (GDPR compliance)
   Sentry.setUser({
     id: userId,
-    email,
   });
 
   if (clientId) {

@@ -24,7 +24,6 @@ build/
 .claude/
 TODO.md 
 PLAN.md
-docs/ 
 
 
 # Logs
@@ -40,6 +39,7 @@ test-appointment-flow.ts
 test-full-integration.ts
 test-email.ts
 test-digest.ts
+test-auth.js
 
 # Prisma
 prisma/migrations/*

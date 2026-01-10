@@ -16,7 +16,7 @@ model Client {
   industry          String   // dental, legal, medical, general
   phoneNumber       String   @unique
   email             String?
-  
+
   // Business configuration
   businessHours     Json     // {monday: {start: "09:00", end: "17:00"}, ...}
   greetingMessage   String   @db.Text
@@ -28,6 +28,11 @@ model Client {
   escalationRules   Json     // Transfer rules, keywords, etc.
   integrations      Json?    // Calendar, CRM configs
   isActive          Boolean  @default(true)
+
+  // GDPR/DSGVO compliance
+  gdprConsentMessage     String?  @db.Text  // Custom consent announcement
+  requireExplicitConsent Boolean  @default(true)
+  retentionSettings      Json?    // Custom retention periods per client
   
   // Metadata
   createdAt         DateTime @default(now())
@@ -183,15 +188,19 @@ model Call {
   tokensUsed      Int?
   cost            Float?     // Total cost in EUR
   latencyMs       Int?       // Average response latency
-  
+
+  // GDPR/DSGVO compliance
+  consentGiven     Boolean   @default(false)
+  consentTimestamp DateTime?
+
   // Additional data
   metadata        Json?
-  
+
   // Relations
   client          Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
   messages        Message[]
   appointments    Appointment[]
-  
+
   @@index([clientId])
   @@index([callSid])
   @@index([status])
@@ -279,11 +288,14 @@ model Appointment {
   // Reminders
   reminderSent    Boolean           @default(false)
   reminderSentAt  DateTime?
-  
+
+  // GDPR/DSGVO compliance
+  anonymizedAt    DateTime?         // Set when PII is anonymized for retention
+
   // Metadata
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
-  
+
   // Relations
   call            Call?             @relation(fields: [callId], references: [id], onDelete: SetNull)
   client          Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
@@ -441,4 +453,79 @@ model DailyMetrics {
   createdAt   DateTime @default(now())
 
   @@index([date])
+}
+
+// ============================================
+// GDPR/DSGVO Compliance Models
+// ============================================
+
+// Audit log for tracking all data access (DSGVO Art. 30)
+model AuditLog {
+  id           String   @id @default(cuid())
+  action       String   // VIEW_CALL, VIEW_MESSAGES, EXPORT_DATA, DELETE_DATA, etc.
+  userId       String
+  clientId     String
+  resourceType String   // Call, Message, Appointment, etc.
+  resourceId   String
+  subjectHash  String?  // SHA-256 hash of data subject identifier (phone/email)
+  ipAddress    String
+  userAgent    String
+  details      Json?    // Additional context
+  timestamp    DateTime @default(now())
+
+  @@index([userId])
+  @@index([clientId])
+  @@index([action])
+  @@index([timestamp])
+  @@index([subjectHash])
+}
+
+// Data Subject Access Request tracking (DSGVO Art. 15)
+model DsarRequest {
+  id                String     @id @default(cuid())
+  clientId          String
+  requestedBy       String     // User ID who initiated
+  subjectIdentifier String     // Phone number or email
+  identifierType    String     // "phone" or "email"
+  status            DsarStatus @default(PENDING)
+  exportUrl         String?    // Secure download URL
+  completedAt       DateTime?
+  createdAt         DateTime   @default(now())
+  expiresAt         DateTime   // Export link expiration
+
+  @@index([clientId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum DsarStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  EXPIRED
+  FAILED
+}
+
+// Data erasure request tracking (DSGVO Art. 17)
+model ErasureRequest {
+  id                String        @id @default(cuid())
+  clientId          String
+  requestedBy       String        // User ID who initiated
+  subjectIdentifier String        // Phone number or email
+  status            ErasureStatus @default(PENDING)
+  approvedBy        String?       // Admin who approved (if required)
+  executedAt        DateTime?
+  recordsDeleted    Json?         // Summary of what was deleted
+  createdAt         DateTime      @default(now())
+
+  @@index([clientId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum ErasureStatus {
+  PENDING
+  APPROVED
+  EXECUTED
+  REJECTED
 }

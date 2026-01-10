@@ -1,9 +1,15 @@
 import pino from 'pino';
 import { env } from '../config/env.js';
+import { pinoRedactPaths } from './pii-redactor.js';
 
-// Create logger instance
+// Create logger instance with PII redaction for GDPR compliance
 export const logger = pino({
   level: env.LOG_LEVEL,
+  // Redact PII from logs (GDPR/DSGVO compliance)
+  redact: {
+    paths: pinoRedactPaths,
+    censor: '[REDACTED]',
+  },
   transport:
     env.NODE_ENV === 'development'
       ? {
