@@ -1,3 +1,4 @@
+import { captureError } from '../config/sentry.js';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import rateLimit from '@fastify/rate-limit';
@@ -64,6 +65,7 @@ export async function authRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
     try {
+      
       const { email, password } = loginSchema.parse(request.body);
 
       // Attempt login

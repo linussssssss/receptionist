@@ -5,6 +5,7 @@ import { syncRetryJob } from './sync-retry.job.js';
 import { appointmentReminderJob } from './appointment-reminder.job.js';
 import { sessionCleanupJob } from './session-cleanup.job.js';
 import { invitationCleanupJob } from './invitation-cleanup.job.js';
+import { dailyDigestJob } from './daily-digest.job.js';
 
 export interface ScheduledJob {
   name: string;
@@ -18,6 +19,7 @@ const jobs: ScheduledJob[] = [
   appointmentReminderJob,
   sessionCleanupJob,
   invitationCleanupJob,
+  dailyDigestJob,
 ];
 
 const scheduledTasks: cron.ScheduledTask[] = [];

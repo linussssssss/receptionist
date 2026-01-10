@@ -22,7 +22,10 @@ build/
 *~
 .DS_Store
 .claude/
-TODO.md
+TODO.md 
+PLAN.md
+docs/ 
+
 
 # Logs
 logs/
@@ -35,6 +38,7 @@ coverage/
 test-auth.js
 test-appointment-flow.ts
 test-full-integration.ts
+test-email.ts
 
 # Prisma
 prisma/migrations/*

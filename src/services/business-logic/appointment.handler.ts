@@ -3,6 +3,7 @@ import { claudeService } from '../ai/claude.service.js';
 import { prisma } from '../../server.js';
 import { emailService } from '../notifications/email.service.js';
 import { logger } from '../../utils/logger.js';
+import { monitoredOperation } from '../monitoring/monitored-operation.js';
 
 interface AppointmentData {
   date?: string;      // ISO date (YYYY-MM-DD)
@@ -89,64 +90,71 @@ export class AppointmentHandler {
   async createAppointment(
     callId: string,
     clientId: string,
-    data: AppointmentData
+    data: AppointmentData,
+    callSid?: string
   ): Promise<any> {
     if (!this.hasRequiredFields(data)) {
       throw new Error('Missing required fields for appointment creation');
     }
 
-    // Combine date and time into ISO timestamp (local time, not UTC)
-    // Remove the Z suffix to treat this as local time, not UTC
-    const scheduledTime = new Date(`${data.date}T${data.time}:00.000`);
+    return monitoredOperation(
+      'appointment.create',
+      async () => {
+        // Combine date and time into ISO timestamp (local time, not UTC)
+        // Remove the Z suffix to treat this as local time, not UTC
+        const scheduledTime = new Date(`${data.date}T${data.time}:00.000`);
 
-    const appointment = await prisma.appointment.create({
-      data: {
-        callId,
-        clientId,
-        customerName: data.name!,
-        customerPhone: data.phone!,
-        datetime: scheduledTime,
-        status: 'CONFIRMED',
-        notes: 'Über Telefon vereinbart',
-      },
-      include: {
-        client: {
-          select: {
-            id: true,
-            name: true,
-            phoneNumber: true,
+        const appointment = await prisma.appointment.create({
+          data: {
+            callId,
+            clientId,
+            customerName: data.name!,
+            customerPhone: data.phone!,
+            datetime: scheduledTime,
+            status: 'CONFIRMED',
+            notes: 'Über Telefon vereinbart',
           },
-        },
-      },
-    });
-
-    // Send confirmation email if customer has email
-    if (appointment.customerEmail) {
-      logger.info(
-        { appointmentId: appointment.id },
-        'Sending confirmation email for new appointment'
-      );
-
-      // Fire and forget - don't wait for email to complete
-      emailService
-        .sendAppointmentConfirmation(appointment)
-        .then((result) => {
-          if (!result.success) {
-            logger.error(
-              { appointmentId: appointment.id, error: result.error },
-              'Failed to send confirmation email'
-            );
-          }
-        })
-        .catch((err) => {
-          logger.error(
-            { err, appointmentId: appointment.id },
-            'Error sending confirmation email'
-          );
+          include: {
+            client: {
+              select: {
+                id: true,
+                name: true,
+                phoneNumber: true,
+              },
+            },
+          },
         });
-    }
 
-    return appointment;
+        // Send confirmation email if customer has email
+        if (appointment.customerEmail) {
+          logger.info(
+            { appointmentId: appointment.id },
+            'Sending confirmation email for new appointment'
+          );
+
+          // Fire and forget - don't wait for email to complete
+          emailService
+            .sendAppointmentConfirmation(appointment)
+            .then((result) => {
+              if (!result.success) {
+                logger.error(
+                  { appointmentId: appointment.id, error: result.error },
+                  'Failed to send confirmation email'
+                );
+              }
+            })
+            .catch((err) => {
+              logger.error(
+                { err, appointmentId: appointment.id },
+                'Error sending confirmation email'
+              );
+            });
+        }
+
+        return appointment;
+      },
+      { clientId, callSid }
+    );
   }
 
   /**

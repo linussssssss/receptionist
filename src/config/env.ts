@@ -60,8 +60,17 @@ const envSchema = z.object({
   RATE_LIMIT_ANALYTICS_MAX: z.string().default('10').transform((val) => parseInt(val, 10)),
   RATE_LIMIT_WEBHOOK_MAX: z.string().default('100').transform((val) => parseInt(val, 10)),
 
-  // Monitoring
+  // Monitoring & Alerting
   SENTRY_DSN: z.string().optional(),
+  SENTRY_ENVIRONMENT: z.string().default('development'),
+  MONITORING_ENABLED: z.string().default('true').transform((val) => val === 'true'),
+  MONITORING_DETAIL_LEVEL: z.enum(['basic', 'detailed']).default('basic'),
+  ALERT_DEDUPLICATION_WINDOW_MS: z.string().default('300000').transform((val) => parseInt(val, 10)), // 5 minutes
+  ALERT_MAX_PER_HOUR: z.string().default('20').transform((val) => parseInt(val, 10)),
+
+  // Daily Digest
+  DAILY_DIGEST_ENABLED: z.string().default('true').transform((val) => val === 'true'),
+  DAILY_DIGEST_HOUR: z.string().default('8').transform((val) => parseInt(val, 10)), // 0-23
 
   // CORS
   ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),

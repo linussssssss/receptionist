@@ -12,6 +12,10 @@ import { integrationRoutes } from './routes/integrations.js';
 import fastifyFormbody from '@fastify/formbody';
 import { startScheduledJobs, stopScheduledJobs } from './jobs/scheduler.js';
 import { redisService } from './config/redis.js';
+import { initSentry, captureError, flushSentry, isSentryEnabled } from './config/sentry.js';
+
+// Initialize Sentry early for error tracking
+initSentry();
 
 // Initialize Prisma Client
 export const prisma = new PrismaClient({
@@ -104,6 +108,8 @@ fastify.get('/health', async (_request, reply) => {
         status: 'disconnected',
         message: 'Rate limiting using in-memory store',
       },
+      sentry: isSentryEnabled() ? 'enabled' : 'disabled',
+      monitoring: env.MONITORING_ENABLED ? 'enabled' : 'disabled',
     };
   } catch (error) {
     reply.code(503);
@@ -153,6 +159,10 @@ const closeGracefully = async (signal: string) => {
     stopScheduledJobs();
     await redisService.disconnect();
     await prisma.$disconnect();
+    // Flush Sentry events before shutdown
+    if (isSentryEnabled()) {
+      await flushSentry(2000);
+    }
     await fastify.close();
     fastify.log.info('Server closed successfully');
     process.exit(0);
@@ -214,10 +224,16 @@ const start = async () => {
 // Handle uncaught errors
 process.on('unhandledRejection', (reason, promise) => {
   fastify.log.error({ reason, promise }, 'Unhandled Rejection');
+  // Capture to Sentry
+  if (reason instanceof Error) {
+    captureError(reason, { type: 'unhandledRejection' });
+  }
 });
 
 process.on('uncaughtException', (err) => {
   fastify.log.error({ err }, 'Uncaught Exception');
+  // Capture to Sentry before shutdown
+  captureError(err, { type: 'uncaughtException' });
   closeGracefully('UNCAUGHT_EXCEPTION');
 });
 

@@ -403,3 +403,42 @@ model CalendarWebhook {
   @@index([channelId])
   @@index([expiration])
 }
+
+// Alert log for monitoring and deduplication
+model AlertLog {
+  id          String   @id @default(cuid())
+
+  alertType   String   // AlertType enum value (claude_api_failure, appointment_creation_failed, etc.)
+  severity    String   // critical, warning, info
+  alertHash   String   // Hash for deduplication (type + clientId + errorMessage)
+
+  message     String   @db.Text
+  details     Json?    // Additional context (stack trace, request details, etc.)
+
+  // Context
+  clientId    String?
+  callId      String?
+  userId      String?
+
+  // Delivery tracking
+  sentTo      String[] // Email addresses that received this alert
+  sentAt      DateTime @default(now())
+
+  @@index([alertType])
+  @@index([alertHash])
+  @@index([sentAt])
+  @@index([clientId])
+}
+
+// Daily metrics for trend analysis and digest emails
+model DailyMetrics {
+  id          String   @id @default(cuid())
+  date        DateTime @unique  // Date at midnight (start of day)
+
+  // Aggregated metrics stored as JSON
+  metrics     Json     // DailyDigestMetrics object
+
+  createdAt   DateTime @default(now())
+
+  @@index([date])
+}

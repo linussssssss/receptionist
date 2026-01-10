@@ -1,5 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { env } from '../../config/env.js';
+import { monitoredOperation } from '../monitoring/monitored-operation.js';
+import { alertService, AlertType, MetricType } from '../monitoring/alert.service.js';
+import { captureError } from '../../config/sentry.js';
 
 interface ConversationMessage {
   role: 'user' | 'assistant';
@@ -27,46 +30,44 @@ export class ClaudeService {
   async generateResponse(
     systemPrompt: string,
     conversationHistory: ConversationMessage[],
-    currentUserMessage: string
+    currentUserMessage: string,
+    context?: { clientId?: string; callSid?: string }
   ): Promise<ClaudeResponse> {
-    try {
-      const messages: Anthropic.MessageParam[] = [
-        ...conversationHistory.map((msg) => ({
-          role: msg.role,
-          content: msg.content,
-        })),
-        {
-          role: 'user' as const,
-          content: currentUserMessage,
-        },
-      ];
+    return monitoredOperation(
+      'claude.generateResponse',
+      async () => {
+        const messages: Anthropic.MessageParam[] = [
+          ...conversationHistory.map((msg) => ({
+            role: msg.role,
+            content: msg.content,
+          })),
+          {
+            role: 'user' as const,
+            content: currentUserMessage,
+          },
+        ];
 
-      console.log('Calling Claude API with messages:', messages.length);
+        console.log('Calling Claude API with messages:', messages.length);
 
-      const response = await this.client.messages.create({
-        model: 'claude-sonnet-4-5',
-        max_tokens: 512,
-        system: systemPrompt,
-        messages,
-      });
+        const response = await this.client.messages.create({
+          model: 'claude-sonnet-4-5',
+          max_tokens: 512,
+          system: systemPrompt,
+          messages,
+        });
 
-      console.log('Claude API response received');
+        console.log('Claude API response received');
 
-      const responseText = response.content[0].type === 'text' 
-        ? response.content[0].text 
-        : '';
+        const responseText = response.content[0].type === 'text'
+          ? response.content[0].text
+          : '';
 
-      return {
-        response: responseText,
-      };
-    } catch (err: any) {
-      console.error('Claude API error details:', {
-        message: err.message,
-        status: err.status,
-        error: err.error,
-      });
-      throw new Error(`Claude API error: ${err.message || err}`);
-    }
+        return {
+          response: responseText,
+        };
+      },
+      context || {}
+    );
   }
 
   /**
@@ -191,6 +192,14 @@ YOU ARE A CLASSIFIER, NOT A CONVERSATIONAL AGENT. RETURN ONLY JSON.`;
       };
     } catch (err: any) {
       console.error('Intent classification error:', err.message);
+      // Capture error for monitoring but don't alert (non-critical, has fallback)
+      if (err instanceof Error) {
+        captureError(err, { operation: 'claude.classifyIntent' });
+      }
+      alertService.recordMetric(MetricType.OPERATION_FAILURE, 1, {
+        operation: 'claude.classifyIntent',
+        error: err.message,
+      }).catch(() => {});
       return {
         intent: 'other',
         confidence: 0.8,
@@ -317,8 +326,16 @@ IF YOU OUTPUT ANYTHING OTHER THAN PURE JSON, YOU HAVE FAILED YOUR TASK.`;
       console.log('Missing fields:', missingFields);
 
       return filtered;
-    } catch (err) {
+    } catch (err: any) {
       console.error('Appointment extraction error:', err);
+      // Capture error for monitoring but don't alert (non-critical, has fallback)
+      if (err instanceof Error) {
+        captureError(err, { operation: 'claude.extractAppointmentDetails' });
+      }
+      alertService.recordMetric(MetricType.OPERATION_FAILURE, 1, {
+        operation: 'claude.extractAppointmentDetails',
+        error: err.message || String(err),
+      }).catch(() => {});
       return {};
     }
   }
