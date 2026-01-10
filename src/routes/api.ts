@@ -436,7 +436,7 @@ export async function apiRoutes(fastify: FastifyInstance) {
         appointmentsByStatus,
         callsByHour,
         uniqueCustomers,
-        returningCustomers,
+        _returningCustomers,
       ] = await Promise.all([
         // Total calls
         prisma.call.count({ where }),
@@ -705,7 +705,7 @@ export async function apiRoutes(fastify: FastifyInstance) {
    * POST /api/client/settings/test-greeting
    * Preview how the greeting would sound (returns TTS URL or text)
    */
-  fastify.post('/api/client/settings/test-greeting', async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.post('/api/client/settings/test-greeting', async (request: FastifyRequest, _reply: FastifyReply) => {
     const body = z.object({ message: z.string().min(1) }).parse(request.body);
 
     // For now, just return the text. In production, this could:

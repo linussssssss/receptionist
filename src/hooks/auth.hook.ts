@@ -131,7 +131,7 @@ export async function injectClientContext(
  */
 export async function optionalAuthenticate(
   request: FastifyRequest,
-  reply: FastifyReply
+  _reply: FastifyReply
 ): Promise<void> {
   try {
     const authHeader = request.headers.authorization;

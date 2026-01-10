@@ -23,7 +23,7 @@ vi.mock('../notifications/email.service.js', () => ({
 }));
 
 vi.mock('../monitoring/monitored-operation.js', () => ({
-  monitoredOperation: vi.fn((name, fn, context) => fn()),
+  monitoredOperation: vi.fn((_name, fn, _context) => fn()),
 }));
 
 describe('AppointmentHandler', () => {

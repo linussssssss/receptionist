@@ -2,7 +2,7 @@ import { prisma } from '../../server.js';
 import { googleCalendarService } from './google-calendar.service.js';
 import { emailService } from '../notifications/email.service.js';
 import { logger } from '../../utils/logger.js';
-import type { CalendarSyncOperation, GoogleCalendarEvent } from '../../types/google-calendar.js';
+import type { CalendarSyncOperation } from '../../types/google-calendar.js';
 import { alertService, AlertType, MetricType } from '../monitoring/alert.service.js';
 import { captureError } from '../../config/sentry.js';
 
@@ -100,7 +100,7 @@ export class CalendarSyncService {
       }
 
       // Update sync log as successful
-      await this.updateSyncLog(syncLog.id, 'SUCCESS', undefined, calendarEventId);
+      await this.updateSyncLog(syncLog.id, 'SUCCESS', undefined, calendarEventId ?? undefined);
 
       // Update last sync time
       await this.updateLastSyncTime(appointment.clientId);

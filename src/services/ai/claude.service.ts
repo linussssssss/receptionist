@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { env } from '../../config/env.js';
 import { monitoredOperation } from '../monitoring/monitored-operation.js';
-import { alertService, AlertType, MetricType } from '../monitoring/alert.service.js';
+import { alertService, MetricType } from '../monitoring/alert.service.js';
 import { captureError } from '../../config/sentry.js';
 
 interface ConversationMessage {

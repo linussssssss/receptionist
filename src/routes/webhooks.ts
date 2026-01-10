@@ -294,7 +294,7 @@ export async function webhookRoutes(fastify: FastifyInstance) {
         // Get session early to access client settings
         const session = callSessionManager.getSession(event.CallSid);
         if (!session) {
-          fastify.log.warn('Session not found for call:', event.CallSid);
+          fastify.log.warn({ callSid: event.CallSid }, 'Session not found for call');
           reply.type('text/xml');
           return twilioService.createSayAndHangup('Es tut mir leid, ein Fehler ist aufgetreten.');
         }

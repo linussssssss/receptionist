@@ -30,7 +30,7 @@ export class IntentClassifier {
    */
   shouldEscalate(
     intent: string,
-    confidence: number,
+    _confidence: number,
     conversationHistory: Array<any>,
     escalationRules: any
   ): boolean {

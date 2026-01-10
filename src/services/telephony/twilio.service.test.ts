@@ -29,7 +29,7 @@ vi.mock('twilio', () => {
       play: function(url: string) {
         elements.push(`<Play>${url}</Play>`);
       },
-      gather: function(options: any) {
+      gather: function(_options: any) {
         hasGather = true;
         return {
           say: function(opts: any, text: string) {
@@ -62,7 +62,7 @@ vi.mock('twilio', () => {
   function twilioClient() {
     return {
       calls: Object.assign(
-        function(sid: string) { return { fetch: mockCallsFetch }; },
+        function(_sid: string) { return { fetch: mockCallsFetch }; },
         { create: mockCallsCreate }
       ),
       recordings: { list: mockRecordingsList },
