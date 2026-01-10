@@ -113,6 +113,7 @@ src/
 - [Deployment Guide](docs/DEPLOYMENT.md) - Production deployment instructions
 - [Operations Guide](docs/OPERATIONS.md) - Monitoring, jobs, troubleshooting
 - [Contributing](docs/CONTRIBUTING.md) - Development setup and guidelines
+- [Testing](docs/TESTING.md) - Unit Tests
 
 ### Integration Guides
 
