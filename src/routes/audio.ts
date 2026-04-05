@@ -1,7 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { elevenLabsService } from '../services/ai/elevenlabs.service.js';
-import { prisma } from '../server.js';
 import { authenticate } from '../hooks/auth.hook.js';
 import { RATE_LIMIT_PRESETS, KEY_GENERATORS } from '../config/rate-limits.js';
 
@@ -60,17 +59,7 @@ export async function audioRoutes(fastify: FastifyInstance) {
         }
       }
 
-      // Get voice ID from client settings if available
-      let voiceId = process.env.ELEVENLABS_VOICE_ID;
-      if (effectiveClientId !== 'default') {
-        const client = await prisma.client.findUnique({
-          where: { id: effectiveClientId },
-          select: { voiceId: true },
-        });
-        if (client?.voiceId) {
-          voiceId = client.voiceId;
-        }
-      }
+      // TODO: Voice ID selection from client settings will be added when elevenLabsService.textToSpeech supports it
 
       fastify.log.info(
         {
@@ -150,7 +139,7 @@ export async function audioRoutes(fastify: FastifyInstance) {
    */
   fastify.post(
     '/audio/clear-cache',
-    async (request: FastifyRequest, reply: FastifyReply) => {
+    async (_request: FastifyRequest, _reply: FastifyReply) => {
       const size = audioCache.size;
       audioCache.clear();
       fastify.log.info({ clearedEntries: size }, 'Audio cache cleared');
@@ -164,7 +153,7 @@ export async function audioRoutes(fastify: FastifyInstance) {
    */
   fastify.get(
     '/audio/cache-stats',
-    async (request: FastifyRequest, reply: FastifyReply) => {
+    async (_request: FastifyRequest, _reply: FastifyReply) => {
       const now = Date.now();
       const entries = Array.from(audioCache.entries());
 

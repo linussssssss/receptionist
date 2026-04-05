@@ -64,6 +64,7 @@ export async function authRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
     try {
+      
       const { email, password } = loginSchema.parse(request.body);
 
       // Attempt login
@@ -432,9 +433,9 @@ export async function authRoutes(fastify: FastifyInstance) {
     {
       preHandler: [authenticate, requireRole('ADMIN')],
     },
-    async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const { id } = request.params;
+        const { id } = request.params as { id: string };
 
         // Verify invitation belongs to user's client
         const invitation = await prisma.invitation.findFirst({
@@ -498,9 +499,9 @@ export async function authRoutes(fastify: FastifyInstance) {
     {
       preHandler: [authenticate, requireRole('ADMIN')],
     },
-    async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const { id } = request.params;
+        const { id } = request.params as { id: string };
         const updates = updateUserSchema.parse(request.body);
 
         // Verify user belongs to same client

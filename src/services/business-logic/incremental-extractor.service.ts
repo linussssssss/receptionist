@@ -54,7 +54,6 @@ export class IncrementalAppointmentExtractor {
 
     // Get current date for context with weekday
     const now = new Date();
-    const currentYear = now.getFullYear();
     const currentDateStr = now.toISOString().split('T')[0];
     const weekdayName = now.toLocaleDateString('de-DE', { weekday: 'long' });
 

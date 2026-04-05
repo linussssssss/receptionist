@@ -8,6 +8,7 @@ yarn-error.log*
 .env
 .env.local
 .env.*.local
+dashboard/.env.local
 
 # Build output
 dist/
@@ -22,7 +23,9 @@ build/
 *~
 .DS_Store
 .claude/
-TODO.md
+TODO.md 
+PLAN.md
+
 
 # Logs
 logs/
@@ -35,6 +38,9 @@ coverage/
 test-auth.js
 test-appointment-flow.ts
 test-full-integration.ts
+test-email.ts
+test-digest.ts
+test-auth.js
 
 # Prisma
 prisma/migrations/*

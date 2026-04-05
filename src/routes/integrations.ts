@@ -230,7 +230,7 @@ export async function integrationRoutes(fastify: FastifyInstance) {
     try {
       const channelId = request.headers['x-goog-channel-id'] as string;
       const resourceState = request.headers['x-goog-resource-state'] as string;
-      const resourceId = request.headers['x-goog-resource-id'] as string;
+      // Note: x-goog-resource-id header is available but not currently used
 
       if (!channelId) {
         reply.code(400);

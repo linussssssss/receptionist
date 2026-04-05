@@ -207,7 +207,7 @@ function UserManagementPage() {
                   <Label htmlFor="role">Role</Label>
                   <Select
                     value={inviteRole}
-                    onValueChange={(value) => setInviteRole(value as 'ADMIN' | 'STAFF')}
+                    onValueChange={(value: string) => setInviteRole(value as 'ADMIN' | 'STAFF')}
                     disabled={inviting}
                   >
                     <SelectTrigger className="mt-1">
@@ -299,7 +299,7 @@ function UserManagementPage() {
                   <TableCell>
                     <Select
                       value={user.role}
-                      onValueChange={(value) =>
+                      onValueChange={(value: string) =>
                         handleChangeUserRole(user.id, value as 'ADMIN' | 'STAFF')
                       }
                     >

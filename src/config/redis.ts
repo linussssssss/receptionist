@@ -1,17 +1,18 @@
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
 import { logger } from '../utils/logger.js';
 import { env } from './env.js';
+
+type RedisClient = Redis;
 
 /**
  * Redis Service for distributed caching and rate limiting
  * Provides graceful fallback to in-memory storage if Redis is unavailable
  */
 class RedisService {
-  private client: Redis | null = null;
+  private client: RedisClient | null = null;
   private isConnected: boolean = false;
   private connectionAttempts: number = 0;
   private maxRetries: number = 5;
-  private retryDelay: number = 1000; // Start with 1 second
 
   /**
    * Initialize Redis connection
@@ -44,7 +45,7 @@ class RedisService {
         logger.info('Redis ready to accept commands');
       });
 
-      this.client.on('error', (error) => {
+      this.client.on('error', (error: Error) => {
         logger.error({ err: error }, 'Redis connection error');
         this.isConnected = false;
       });
@@ -117,7 +118,7 @@ class RedisService {
    * Get the Redis client instance
    * Returns null if Redis is not available (fallback to in-memory)
    */
-  getClient(): Redis | null {
+  getClient(): RedisClient | null {
     return this.client;
   }
 

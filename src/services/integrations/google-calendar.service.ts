@@ -1,4 +1,4 @@
-import { google, calendar_v3 } from 'googleapis';
+import { google } from 'googleapis';
 import { oauthService } from './oauth.service.js';
 import { prisma } from '../../server.js';
 import type { CalendarEvent, WatchResponse, AppointmentData, GoogleCalendarEvent } from '../../types/google-calendar.js';
@@ -122,8 +122,8 @@ export class GoogleCalendarService {
 
       return {
         events: response.data.items || [],
-        nextSyncToken: response.data.nextSyncToken,
-        nextPageToken: response.data.nextPageToken,
+        nextSyncToken: response.data.nextSyncToken ?? undefined,
+        nextPageToken: response.data.nextPageToken ?? undefined,
       };
     } catch (err: any) {
       // If sync token is invalid, Google returns 410 Gone
@@ -145,8 +145,8 @@ export class GoogleCalendarService {
 
         return {
           events: response.data.items || [],
-          nextSyncToken: response.data.nextSyncToken,
-          nextPageToken: response.data.nextPageToken,
+          nextSyncToken: response.data.nextSyncToken ?? undefined,
+          nextPageToken: response.data.nextPageToken ?? undefined,
         };
       }
       throw err;
@@ -218,7 +218,7 @@ export class GoogleCalendarService {
       id: response.data.id!,
       resourceId: response.data.resourceId!,
       resourceUri: response.data.resourceUri!,
-      token: response.data.token,
+      token: response.data.token ?? undefined,
       expiration: response.data.expiration!,
     };
   }
@@ -318,7 +318,7 @@ export class GoogleCalendarService {
   /**
    * Convert Google Calendar event to AppointmentData
    */
-  convertCalendarEventToAppointment(event: GoogleCalendarEvent, clientId: string): AppointmentData | null {
+  convertCalendarEventToAppointment(event: GoogleCalendarEvent, _clientId: string): AppointmentData | null {
     if (!event.start?.dateTime || !event.end?.dateTime) {
       return null; // Skip all-day events
     }
@@ -333,7 +333,7 @@ export class GoogleCalendarService {
     // 1. Check if event has attendees (guests added to the event)
     if (event.attendees && event.attendees.length > 0) {
       // Use the first attendee's email
-      customerEmail = event.attendees[0].email;
+      customerEmail = event.attendees[0].email ?? undefined;
     }
 
     // 2. Try to extract from description if no attendees

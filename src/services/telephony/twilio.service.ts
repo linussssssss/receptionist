@@ -11,6 +11,59 @@ export class TwilioService {
   }
 
   /**
+   * Default GDPR consent announcement (German)
+   * Can be overridden per client with gdprConsentMessage
+   */
+  private static DEFAULT_CONSENT_MESSAGE =
+    'Willkommen. Dieser Anruf wird durch einen KI-Assistenten bearbeitet. ' +
+    'Ihre Angaben werden gemäß unserer Datenschutzerklärung verarbeitet. ' +
+    'Mit Ihrer Fortsetzung des Gesprächs stimmen Sie der Verarbeitung zu. ' +
+    'Wenn Sie mit einem Mitarbeiter sprechen möchten, sagen Sie bitte Mitarbeiter.';
+
+  /**
+   * Create TwiML response for GDPR consent announcement
+   * This should be played at the start of every call before greeting
+   */
+  createConsentAnnouncementResponse(
+    customMessage: string | null,
+    consentActionUrl: string,
+    useElevenLabs: boolean = false,
+    audioBaseUrl?: string,
+    clientId?: string
+  ): string {
+    const response = new VoiceResponse();
+    const message = customMessage || TwilioService.DEFAULT_CONSENT_MESSAGE;
+
+    // Gather to detect if caller says "Mitarbeiter" (human agent request)
+    const gather = response.gather({
+      input: ['speech'],
+      language: 'de-DE',
+      action: consentActionUrl,
+      speechTimeout: 'auto',
+      timeout: 3,
+      hints: 'Mitarbeiter, Mensch, Person, Verbinden',
+    });
+
+    if (useElevenLabs && audioBaseUrl && clientId) {
+      const audioUrl = `${audioBaseUrl}/audio/tts?text=${encodeURIComponent(message)}&clientId=${clientId}`;
+      gather.play(audioUrl);
+    } else {
+      gather.say(
+        {
+          voice: 'Polly.Vicki',
+          language: 'de-DE',
+        },
+        message
+      );
+    }
+
+    // If no input, proceed to greeting (implicit consent by continuing)
+    response.redirect(consentActionUrl + '?implicitConsent=true');
+
+    return response.toString();
+  }
+
+  /**
    * Create TwiML response to greet caller
    */
   createGreetingResponse(greeting: string, actionUrl?: string): string {

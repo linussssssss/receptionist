@@ -2,7 +2,9 @@ import { prisma } from '../../server.js';
 import { googleCalendarService } from './google-calendar.service.js';
 import { emailService } from '../notifications/email.service.js';
 import { logger } from '../../utils/logger.js';
-import type { CalendarSyncOperation, GoogleCalendarEvent } from '../../types/google-calendar.js';
+import type { CalendarSyncOperation } from '../../types/google-calendar.js';
+import { alertService, AlertType, MetricType } from '../monitoring/alert.service.js';
+import { captureError } from '../../config/sentry.js';
 
 export class CalendarSyncService {
   /**
@@ -98,13 +100,30 @@ export class CalendarSyncService {
       }
 
       // Update sync log as successful
-      await this.updateSyncLog(syncLog.id, 'SUCCESS', undefined, calendarEventId);
+      await this.updateSyncLog(syncLog.id, 'SUCCESS', undefined, calendarEventId ?? undefined);
 
       // Update last sync time
       await this.updateLastSyncTime(appointment.clientId);
     } catch (err: any) {
       // Update sync log with error
       await this.updateSyncLog(syncLog.id, 'FAILED', err.message);
+
+      // Record metric for monitoring
+      alertService.recordMetric(MetricType.OPERATION_FAILURE, 1, {
+        operation: 'calendar.sync',
+        clientId: appointment.clientId,
+        appointmentId,
+        error: err.message,
+      }).catch(() => {});
+
+      // Capture to Sentry
+      if (err instanceof Error) {
+        captureError(err, {
+          operation: 'calendar.sync',
+          clientId: appointment.clientId,
+          appointmentId,
+        });
+      }
 
       // Don't rethrow - we don't want sync failures to break appointment creation
       console.error(`Failed to sync appointment ${appointmentId} to calendar:`, err);
@@ -316,10 +335,12 @@ export class CalendarSyncService {
    * Retry failed syncs
    */
   async retryFailedSyncs(): Promise<void> {
+    const MAX_RETRIES = 5;
+
     const failedSyncs = await prisma.calendarSync.findMany({
       where: {
         status: 'FAILED',
-        retryCount: { lt: 3 },
+        retryCount: { lt: MAX_RETRIES },
       },
       include: {
         appointment: true,
@@ -329,10 +350,31 @@ export class CalendarSyncService {
     for (const sync of failedSyncs) {
       try {
         // Increment retry count
-        await prisma.calendarSync.update({
+        const updated = await prisma.calendarSync.update({
           where: { id: sync.id },
           data: { retryCount: { increment: 1 } },
         });
+
+        // Check if this is the last retry
+        if (updated.retryCount >= MAX_RETRIES) {
+          // Send critical alert - sync retries exhausted
+          alertService.sendCriticalAlert(AlertType.CALENDAR_SYNC_EXHAUSTED, {
+            errorMessage: `Calendar sync failed after ${MAX_RETRIES} retries: ${sync.errorMessage || 'Unknown error'}`,
+            timestamp: new Date(),
+            severity: 'critical',
+            clientId: sync.clientId,
+            operation: `calendar.sync.${sync.operation.toLowerCase()}`,
+            requestDetails: {
+              syncId: sync.id,
+              appointmentId: sync.appointmentId,
+              direction: sync.direction,
+              operation: sync.operation,
+              retryCount: updated.retryCount,
+            },
+          }).catch((err) => {
+            console.error('Failed to send calendar sync exhausted alert:', err);
+          });
+        }
 
         // Retry sync
         if (sync.direction === 'OUTBOUND') {
